@@ -1,89 +1,443 @@
 import sys
 import os
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+import json
+import io
+
+from typing import Dict, Any
+
 import pandas as pd
 
-# Add project root and src to path
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC_DIR = os.path.join(PROJECT_ROOT, "src")
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    UploadFile,
+    File
+)
+
+from fastapi.middleware.cors import CORSMiddleware
+
+
+# ============================================================
+# PROJECT PATHS
+# ============================================================
+
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(
+        os.path.abspath(__file__)
+    )
+)
+
+SRC_DIR = os.path.join(
+    PROJECT_ROOT,
+    "src"
+)
+
+
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
+
+# ============================================================
+# IMPORT REAL PREDICTION PIPELINE
+# ============================================================
+
 from prediction import (
-    quantum_predict,
-    classical_predict,
     detect_intrusion,
     SELECTED_FEATURES
 )
 
+
+# ============================================================
+# FASTAPI APPLICATION
+# ============================================================
+
 app = FastAPI(
     title="UC029 Quantum Intrusion Detection API",
-    description="Dual-Engine Classical Random Forest + Quantum SVM Threat Analysis",
+    description=(
+        "Hybrid Quantum-Classical Network "
+        "Intrusion Detection System using "
+        "Random Forest and Quantum SVM."
+    ),
     version="1.0.0"
 )
 
-# Enable CORS for React frontend
+
+# ============================================================
+# CORS
+# ============================================================
+
 app.add_middleware(
     CORSMiddleware,
+
     allow_origins=["*"],
+
     allow_credentials=True,
+
     allow_methods=["*"],
-    allow_headers=["*"],
+
+    allow_headers=["*"]
 )
 
-class TrafficInput(BaseModel):
-    init_win: float = 410.0
-    fwd_max: float = 0.0
-    bwd_max: float = 0.0
-    avg_fwd: float = 0.0
-    avg_bwd: float = 0.0
-    total_fwd: float = 0.0
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.get("/health")
+def health_check():
+
+    return {
+        "system": "UC029 Quantum Intrusion Detection API",
+
+        "status": "ONLINE",
+
+        "classical_model": "Random Forest",
+
+        "quantum_model": "Fidelity Quantum Kernel + Quantum SVM",
+
+        "quantum_features": SELECTED_FEATURES,
+
+        "quantum_feature_count": len(
+            SELECTED_FEATURES
+        )
+    }
+
+
+# ============================================================
+# JSON PREDICTION
+# ============================================================
+
+@app.post("/predict")
+def predict_traffic(
+    traffic: Dict[str, Any]
+):
+
+    try:
+
+        # ----------------------------------------------------
+        # Check input
+        # ----------------------------------------------------
+
+        if not traffic:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Empty traffic data provided."
+            )
+
+
+        # ----------------------------------------------------
+        # Run REAL Hybrid ML pipeline
+        # ----------------------------------------------------
+
+        result = detect_intrusion(
+            traffic
+        )
+
+
+        # ----------------------------------------------------
+        # Return prediction
+        # ----------------------------------------------------
+
+        return {
+            "success": True,
+
+            "classical_prediction":
+                result[
+                    "classical_prediction"
+                ],
+
+            "quantum_prediction":
+                result[
+                    "quantum_prediction"
+                ],
+
+            "final_prediction":
+                result[
+                    "final_prediction"
+                ],
+
+            "risk_level":
+                result[
+                    "risk_level"
+                ]
+        }
+
+
+    except HTTPException:
+
+        raise
+
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
+# ============================================================
+# FILE PREDICTION
+# ============================================================
+
+@app.post("/predict-file")
+async def predict_file(
+    file: UploadFile = File(...)
+):
+
+    try:
+
+        # ----------------------------------------------------
+        # Validate filename
+        # ----------------------------------------------------
+
+        if not file.filename:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Filename is missing."
+            )
+
+
+        filename = file.filename.lower()
+
+
+        if not (
+            filename.endswith(".json")
+            or
+            filename.endswith(".csv")
+        ):
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Only JSON and CSV files "
+                    "are supported."
+                )
+            )
+
+
+        # ----------------------------------------------------
+        # Read file
+        # ----------------------------------------------------
+
+        contents = await file.read()
+
+
+        if not contents:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded file is empty."
+            )
+
+
+        # ====================================================
+        # JSON
+        # ====================================================
+
+        if filename.endswith(".json"):
+
+            try:
+
+                data = json.loads(
+                    contents.decode("utf-8")
+                )
+
+            except json.JSONDecodeError:
+
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid JSON file."
+                )
+
+
+            # -----------------------------------------------
+            # Single JSON object
+            # -----------------------------------------------
+
+            if isinstance(
+                data,
+                dict
+            ):
+
+                record = data
+
+
+            # -----------------------------------------------
+            # JSON list
+            # -----------------------------------------------
+
+            elif isinstance(
+                data,
+                list
+            ):
+
+                if len(data) == 0:
+
+                    raise HTTPException(
+                        status_code=400,
+                        detail="JSON list is empty."
+                    )
+
+
+                record = data[0]
+
+
+            else:
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "JSON must contain "
+                        "an object or list."
+                    )
+                )
+
+
+        # ====================================================
+        # CSV
+        # ====================================================
+
+        else:
+
+            try:
+
+                df = pd.read_csv(
+                    io.StringIO(
+                        contents.decode("utf-8")
+                    )
+                )
+
+            except Exception as e:
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Unable to read CSV: {str(e)}"
+                    )
+                )
+
+
+            if df.empty:
+
+                raise HTTPException(
+                    status_code=400,
+                    detail="CSV file is empty."
+                )
+
+
+            # Use first network-flow row
+            record = df.iloc[0].to_dict()
+
+
+        # ====================================================
+        # RUN HYBRID PREDICTION
+        # ====================================================
+
+        result = detect_intrusion(
+            record
+        )
+
+
+        # ====================================================
+        # RETURN RESULT
+        # ====================================================
+
+        return {
+
+            "success": True,
+
+            "filename": file.filename,
+
+            "classical_prediction":
+                result[
+                    "classical_prediction"
+                ],
+
+            "quantum_prediction":
+                result[
+                    "quantum_prediction"
+                ],
+
+            "final_prediction":
+                result[
+                    "final_prediction"
+                ],
+
+            "risk_level":
+                result[
+                    "risk_level"
+                ]
+        }
+
+
+    except HTTPException:
+
+        raise
+
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
+# ============================================================
+# ROOT
+# ============================================================
 
 @app.get("/")
 def root():
+
     return {
-        "system": "UC029 Quantum Intrusion Detection API",
-        "status": "ONLINE",
-        "selected_features": SELECTED_FEATURES
+
+        "project":
+            "UC029 Quantum Intrusion Detection",
+
+        "status":
+            "ONLINE",
+
+        "architecture":
+            "Hybrid Quantum-Classical ML",
+
+        "classical_model":
+            "Random Forest",
+
+        "quantum_model":
+            "Fidelity Quantum Kernel + Quantum SVM",
+
+        "endpoints": {
+
+            "health":
+                "/health",
+
+            "predict":
+                "/predict",
+
+            "predict_file":
+                "/predict-file",
+
+            "documentation":
+                "/docs"
+        }
     }
 
-@app.post("/predict")
-def predict_traffic(traffic: TrafficInput):
-    try:
-        # Build 6-feature input mapping
-        data = {
-            "Init_Win_bytes_forward": traffic.init_win,
-            "Fwd Packet Length Max": traffic.fwd_max,
-            "Bwd Packet Length Max": traffic.bwd_max,
-            "Avg Fwd Segment Size": traffic.avg_fwd,
-            "Avg Bwd Segment Size": traffic.avg_bwd,
-            "Total Length of Fwd Packets": traffic.total_fwd
-        }
-        df = pd.DataFrame([data])
 
-        # Evaluate Quantum SVM
-        q_raw, q_label = quantum_predict(df)
-
-        # Classical Random Forest placeholder/simulation for 6-feature vector
-        # (or fallback heuristic matching 6-feature signature)
-        c_label = "BENIGN" if (traffic.init_win < 10000 and traffic.total_fwd < 5000) else "ATTACK"
-        c_raw = 0 if c_label == "BENIGN" else 1
-
-        final_label = "ATTACK" if (q_raw == 1 or c_raw == 1) else "BENIGN"
-        risk_level = "HIGH" if final_label == "ATTACK" else "LOW"
-
-        return {
-            "classical": c_label,
-            "quantum": q_label,
-            "final": final_label,
-            "risk": risk_level,
-            "simulated": False
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# ============================================================
+# RUN DIRECTLY
+# ============================================================
 
 if __name__ == "__main__":
+
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+
+    uvicorn.run(
+        "backend.main:app",
+        host="127.0.0.1",
+        port=8000,
+        reload=True
+    )

@@ -1,136 +1,70 @@
-import { useState, useEffect } from "react";
-import axios from "axios";
-import "./App.css";
+import React, { useState, useRef, useEffect } from 'react';
+import axios from 'axios';
+import './index.css';
 
-const PRESETS = {
-  uc029: {
-    name: "UC-029 Benign Benchmark",
-    tag: "Verified Sample",
-    data: {
-      init_win: 410,
-      fwd_max: 0,
-      bwd_max: 0,
-      avg_fwd: 0,
-      avg_bwd: 0,
-      total_fwd: 0,
-    },
-  },
-  portScan: {
-    name: "Port Scan Attack Pattern",
-    tag: "High Reconnaissance",
-    data: {
-      init_win: 29200,
-      fwd_max: 1460,
-      bwd_max: 1460,
-      avg_fwd: 480,
-      avg_bwd: 620,
-      total_fwd: 2920,
-    },
-  },
-  ddos: {
-    name: "DDoS Volumetric Burst",
-    tag: "Critical Threat",
-    data: {
-      init_win: 65535,
-      fwd_max: 2500,
-      bwd_max: 0,
-      avg_fwd: 1250,
-      avg_bwd: 0,
-      total_fwd: 50000,
-    },
-  },
-  normalWeb: {
-    name: "Standard HTTPS Traffic",
-    tag: "Benign Session",
-    data: {
-      init_win: 8192,
-      fwd_max: 517,
-      bwd_max: 1420,
-      avg_fwd: 180,
-      avg_bwd: 840,
-      total_fwd: 1540,
-    },
-  },
-};
+const API_BASE_URL = 'http://127.0.0.1:8080';
 
 function App() {
-  const [formData, setFormData] = useState(PRESETS.uc029.data);
-  const [selectedPreset, setSelectedPreset] = useState("uc029");
-  const [result, setResult] = useState(null);
+  const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [history, setHistory] = useState([]);
-  const [backendOnline, setBackendOnline] = useState(null);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [status, setStatus] = useState('Checking...');
+  const fileInputRef = useRef(null);
 
-  // Check backend health
+  // Check API status on load
   useEffect(() => {
-    const checkBackend = async () => {
-      try {
-        await axios.get("http://127.0.0.1:8000/", { timeout: 1200 });
-        setBackendOnline(true);
-      } catch {
-        setBackendOnline(false);
-      }
-    };
-    checkBackend();
-    const interval = setInterval(checkBackend, 5000);
-    return () => clearInterval(interval);
+    axios.get(`${API_BASE_URL}/health`)
+      .then(res => setStatus(res.data.status))
+      .catch(() => setStatus('OFFLINE'));
   }, []);
 
-  const handleChange = (e) => {
-    setSelectedPreset("");
-    setFormData({
-      ...formData,
-      [e.target.name]: parseFloat(e.target.value) || 0,
-    });
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      setFile(e.target.files[0]);
+      setResult(null);
+      setError(null);
+    }
   };
 
-  const loadPreset = (key) => {
-    setSelectedPreset(key);
-    setFormData(PRESETS[key].data);
-    setError("");
+  const triggerFileInput = () => {
+    fileInputRef.current.click();
   };
 
-  const detectTraffic = async () => {
+  const runDemo = async () => {
     setLoading(true);
-    setError("");
-    const startTime = performance.now();
+    setError(null);
+    setFile(null);
+    try {
+      alert('For the demo, please click "Upload Network Flow" and select data/UC029_test_row.json');
+      setLoading(false);
+    } catch (err) {
+      setError(err.message || 'Error running demo');
+      setLoading(false);
+    }
+  };
+
+  const analyzeTraffic = async () => {
+    if (!file) {
+      setError("Please upload a file first.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append('file', file);
 
     try {
-      let data;
-      if (backendOnline) {
-        const response = await axios.post("http://127.0.0.1:8000/predict", formData);
-        data = response.data;
-      } else {
-        // High fidelity frontend preview simulation if FastAPI backend isn't started yet
-        await new Promise((r) => setTimeout(r, 650));
-        const isSuspicious =
-          formData.init_win > 20000 ||
-          formData.total_fwd > 10000 ||
-          (formData.fwd_max > 1200 && formData.bwd_max === 0);
-
-        data = {
-          classical: isSuspicious ? "ATTACK" : "BENIGN",
-          quantum: isSuspicious ? "ATTACK" : "BENIGN",
-          final: isSuspicious ? "ATTACK" : "BENIGN",
-          risk: isSuspicious ? (formData.total_fwd > 20000 ? "CRITICAL" : "HIGH") : "LOW",
-          simulated: true,
-        };
-      }
-
-      const elapsed = Math.round(performance.now() - startTime);
-      const enrichedResult = {
-        ...data,
-        elapsed,
-        timestamp: new Date().toLocaleTimeString(),
-        vector: { ...formData },
-      };
-
-      setResult(enrichedResult);
-      setHistory((prev) => [enrichedResult, ...prev.slice(0, 7)]);
+      const response = await axios.post(`${API_BASE_URL}/predict-file`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      setResult(response.data);
     } catch (err) {
-      console.error(err);
-      setError("Inference request failed. Please check FastAPI backend connection.");
+      setError(err.response?.data?.detail || err.message || 'An error occurred during analysis');
     } finally {
       setLoading(false);
     }
@@ -138,364 +72,139 @@ function App() {
 
   return (
     <div className="app-container">
-      {/* Dynamic Background Glows */}
-      <div className="bg-glow bg-glow-1"></div>
-      <div className="bg-glow bg-glow-2"></div>
-
-      {/* Top Navbar */}
-      <header className="navbar">
-        <div className="brand-group">
-          <div className="logo-badge">
-            <span className="quantum-icon">⚛️</span>
-          </div>
-          <div>
-            <div className="brand-title">
-              <span className="gradient-text">UC-029</span> QUANTUM INTRUSION DETECTION
-            </div>
-            <div className="brand-subtitle">
-              Dual-Engine Quantum Kernel SVM & Classical Ensemble Architecture
-            </div>
-          </div>
-        </div>
-
-        <div className="header-status-panel">
-          <div className="backend-indicator">
-            <span className={`pulse-dot ${backendOnline ? "online" : "standby"}`}></span>
-            <span>
-              {backendOnline === null
-                ? "Connecting..."
-                : backendOnline
-                ? "FastAPI Live"
-                : "Engine Simulator (Standby)"}
-            </span>
-          </div>
-          <div className="badge-qml">
-            <span>6-Qubit State Vector</span>
-          </div>
+      <header className="header">
+        <h1 className="title">UC029 Quantum Intrusion Detection</h1>
+        <p className="subtitle">Hybrid Quantum-Classical Machine Learning System</p>
+        <div className="status-badge">
+          <div className="status-dot"></div>
+          System Status: {status}
         </div>
       </header>
 
-      <main className="main-content">
-        {/* Top Feature Presets */}
-        <section className="presets-bar">
-          <span className="preset-label">⚡ Quick Presets:</span>
-          <div className="preset-buttons">
-            {Object.entries(PRESETS).map(([key, item]) => (
-              <button
-                key={key}
-                className={`preset-btn ${selectedPreset === key ? "active" : ""}`}
-                onClick={() => loadPreset(key)}
+      <div className="dashboard-grid">
+        
+        {/* Left Column: Input Controls */}
+        <div className="input-section">
+          <div className="glass-panel">
+            <h2 className="panel-title">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+              Data Input
+            </h2>
+            
+            <div className="file-upload-area" onClick={triggerFileInput}>
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileChange} 
+                className="file-input"
+                accept=".json,.csv"
+              />
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{marginBottom: '1rem'}}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+              <p>{file ? file.name : "Upload JSON/CSV Network Flow"}</p>
+            </div>
+            
+            <div style={{display: 'flex', gap: '1rem', marginBottom: '1rem'}}>
+              <button 
+                className="btn btn-secondary" 
+                onClick={runDemo}
+                disabled={loading}
               >
-                <span className="preset-name">{item.name}</span>
-                <span className="preset-tag">{item.tag}</span>
+                UC-029 Demo
               </button>
-            ))}
-          </div>
-        </section>
-
-        <div className="dashboard-grid">
-          {/* LEFT PANEL: Feature Vector Input */}
-          <section className="glass-panel input-panel">
-            <div className="panel-header">
-              <div className="panel-title">
-                <span className="title-icon">📊</span>
-                <h3>Quantum Feature Vector</h3>
-              </div>
-              <span className="feature-count-badge">6 Selected Dimensions</span>
-            </div>
-            <p className="panel-desc">
-              Selected via mutual information & quantum kernel feature mapping from the 78-feature CIC-IDS space.
-            </p>
-
-            <div className="feature-grid">
-              <div className="input-group">
-                <div className="input-label-row">
-                  <label>Init Win Bytes Forward</label>
-                  <span className="code-tag">Init_Win_bytes_forward</span>
-                </div>
-                <input
-                  type="number"
-                  step="any"
-                  name="init_win"
-                  value={formData.init_win}
-                  onChange={handleChange}
-                />
-              </div>
-
-              <div className="input-group">
-                <div className="input-label-row">
-                  <label>Fwd Packet Length Max</label>
-                  <span className="code-tag">Fwd_Pkt_Len_Max</span>
-                </div>
-                <input
-                  type="number"
-                  step="any"
-                  name="fwd_max"
-                  value={formData.fwd_max}
-                  onChange={handleChange}
-                />
-              </div>
-
-              <div className="input-group">
-                <div className="input-label-row">
-                  <label>Bwd Packet Length Max</label>
-                  <span className="code-tag">Bwd_Pkt_Len_Max</span>
-                </div>
-                <input
-                  type="number"
-                  step="any"
-                  name="bwd_max"
-                  value={formData.bwd_max}
-                  onChange={handleChange}
-                />
-              </div>
-
-              <div className="input-group">
-                <div className="input-label-row">
-                  <label>Avg Fwd Segment Size</label>
-                  <span className="code-tag">Avg_Fwd_Seg_Size</span>
-                </div>
-                <input
-                  type="number"
-                  step="any"
-                  name="avg_fwd"
-                  value={formData.avg_fwd}
-                  onChange={handleChange}
-                />
-              </div>
-
-              <div className="input-group">
-                <div className="input-label-row">
-                  <label>Avg Bwd Segment Size</label>
-                  <span className="code-tag">Avg_Bwd_Seg_Size</span>
-                </div>
-                <input
-                  type="number"
-                  step="any"
-                  name="avg_bwd"
-                  value={formData.avg_bwd}
-                  onChange={handleChange}
-                />
-              </div>
-
-              <div className="input-group">
-                <div className="input-label-row">
-                  <label>Total Length Fwd Packets</label>
-                  <span className="code-tag">Tot_Len_Fwd_Pkts</span>
-                </div>
-                <input
-                  type="number"
-                  step="any"
-                  name="total_fwd"
-                  value={formData.total_fwd}
-                  onChange={handleChange}
-                />
-              </div>
             </div>
 
-            <button
-              className={`quantum-action-btn ${loading ? "loading" : ""}`}
-              onClick={detectTraffic}
-              disabled={loading}
+            <button 
+              className="btn btn-primary" 
+              onClick={analyzeTraffic}
+              disabled={loading || !file}
             >
-              {loading ? (
-                <div className="btn-loader">
-                  <span className="spinner"></span>
-                  <span>Evaluating Quantum Kernel...</span>
-                </div>
-              ) : (
-                <div className="btn-content">
-                  <span>⚡</span>
-                  <span>EVALUATE NETWORK FLOW</span>
-                </div>
-              )}
+              {loading ? <span className="loading-spinner"></span> : "ANALYZE TRAFFIC"}
             </button>
 
-            {error && <div className="cyber-alert error-alert">⚠️ {error}</div>}
-          </section>
-
-          {/* RIGHT PANEL: Decision & Intelligence */}
-          <section className="glass-panel result-panel">
-            <div className="panel-header">
-              <div className="panel-title">
-                <span className="title-icon">🛡️</span>
-                <h3>Intelligence & Consensus</h3>
+            {error && (
+              <div className="error-message" style={{marginTop: '1rem'}}>
+                <strong>Error:</strong> {error}
               </div>
-              {result && (
-                <span className="latency-badge">
-                  ⏱️ {result.elapsed} ms {result.simulated ? "(simulated)" : ""}
-                </span>
-              )}
+            )}
+          </div>
+
+          <div className="glass-panel" style={{marginTop: '2rem'}}>
+            <h2 className="panel-title">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              Architecture
+            </h2>
+            <p style={{fontSize: '0.875rem', color: 'var(--text-secondary)'}}>
+              This system uses a Hybrid Quantum-Classical pipeline.
+            </p>
+            <div className="quantum-info">
+              <strong>Classical:</strong> Random Forest (78 Features)<br/><br/>
+              <strong>Quantum:</strong> Qiskit Fidelity Quantum Kernel + SVM (6 Selected Features)
             </div>
+          </div>
+        </div>
+
+        {/* Right Column: Results */}
+        <div className="results-section">
+          <div className="glass-panel" style={{height: '100%'}}>
+            <h2 className="panel-title">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+              Analysis Results
+            </h2>
 
             {result ? (
-              <div className="result-content-wrapper">
-                {/* Main Threat Status Banner */}
-                <div
-                  className={`status-hero-card ${
-                    result.final === "ATTACK" ? "status-attack" : "status-benign"
-                  }`}
-                >
-                  <div className="status-hero-icon">
-                    {result.final === "ATTACK" ? "🚨" : "🛡️"}
-                  </div>
-                  <div className="status-hero-info">
-                    <div className="status-tagline">CONSENSUS VERDICT</div>
-                    <div className="status-main-label">{result.final} TRAFFIC</div>
-                    <div className="status-desc">
-                      {result.final === "ATTACK"
-                        ? "Anomalous flow signature identified by Quantum-Classical fusion gate."
-                        : "Verified nominal flow behavior with high fidelity confidence."}
+              <div className="results-container">
+                <div className="results-grid">
+                  <div className="result-card">
+                    <h3>Classical Model</h3>
+                    <div className={`prediction-value ${result.classical_prediction === 'ATTACK' ? 'value-attack' : 'value-benign'}`}>
+                      {result.classical_prediction}
+                    </div>
+                    <div style={{fontSize: '0.75rem', marginTop: '0.5rem', color: 'var(--text-secondary)'}}>
+                      Random Forest
                     </div>
                   </div>
-                  <div className="risk-level-badge">
-                    <span className="risk-title">THREAT LEVEL</span>
-                    <span className="risk-value">{result.risk}</span>
-                  </div>
-                </div>
-
-                {/* Dual Engine Comparison */}
-                <div className="engine-grid">
-                  <div className="engine-card classical-engine">
-                    <div className="engine-header">
-                      <span className="engine-icon">🌲</span>
-                      <div>
-                        <div className="engine-name">Classical Random Forest</div>
-                        <div className="engine-spec">Ensemble Decision Trees</div>
-                      </div>
+                  
+                  <div className="result-card">
+                    <h3>Quantum SVM</h3>
+                    <div className={`prediction-value ${result.quantum_prediction === 'ATTACK' ? 'value-attack' : 'value-benign'}`}>
+                      {result.quantum_prediction}
                     </div>
-                    <div
-                      className={`engine-result ${
-                        result.classical === "ATTACK" ? "res-attack" : "res-benign"
-                      }`}
-                    >
-                      {result.classical}
-                    </div>
-                  </div>
-
-                  <div className="engine-card quantum-engine">
-                    <div className="engine-header">
-                      <span className="engine-icon">⚛️</span>
-                      <div>
-                        <div className="engine-name">Quantum SVM</div>
-                        <div className="engine-spec">Fidelity Quantum Kernel (100×6)</div>
-                      </div>
-                    </div>
-                    <div
-                      className={`engine-result ${
-                        result.quantum === "ATTACK" ? "res-attack" : "res-benign"
-                      }`}
-                    >
-                      {result.quantum}
+                    <div style={{fontSize: '0.75rem', marginTop: '0.5rem', color: 'var(--text-secondary)'}}>
+                      Fidelity Quantum Kernel
                     </div>
                   </div>
                 </div>
 
-                {/* Quantum Metric Telemetry */}
-                <div className="telemetry-box">
-                  <div className="telemetry-title">⚡ Quantum Pipeline Telemetry</div>
-                  <div className="telemetry-items">
-                    <div className="telemetry-item">
-                      <span className="t-label">Feature Scaler</span>
-                      <span className="t-val">MinMaxScaler [0, 1]</span>
-                    </div>
-                    <div className="telemetry-item">
-                      <span className="t-label">Quantum Hilbert Space</span>
-                      <span className="t-val">2^6 = 64 Dimensions</span>
-                    </div>
-                    <div className="telemetry-item">
-                      <span className="t-label">Kernel Reference Set</span>
-                      <span className="t-val">100 Reference Flows</span>
-                    </div>
-                    <div className="telemetry-item">
-                      <span className="t-label">Decision Policy</span>
-                      <span className="t-val">Disjunctive Attack Guard</span>
+                <div className="final-result">
+                  <div>
+                    <div className="final-result-title">Final Detection</div>
+                    <div className={`prediction-value ${result.final_prediction === 'ATTACK' ? 'value-attack' : 'value-benign'}`} style={{fontSize: '2rem'}}>
+                      {result.final_prediction}
                     </div>
                   </div>
+                  
+                  <div style={{textAlign: 'right'}}>
+                    <div className="final-result-title">Risk Level</div>
+                    <div className={`risk-level-badge ${result.risk_level === 'HIGH' ? 'risk-high' : 'risk-low'}`}>
+                      {result.risk_level}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="quantum-info">
+                  <strong>Decision Logic:</strong> If either model detects an anomaly, the final risk is elevated to HIGH/ATTACK to ensure maximum security coverage.
                 </div>
               </div>
             ) : (
-              <div className="empty-state">
-                <div className="empty-quantum-orb">⚛️</div>
-                <h4>Awaiting Flow Ingestion</h4>
-                <p>
-                  Select a traffic preset above or input custom flow parameters, then click{" "}
-                  <strong>Evaluate Network Flow</strong> to execute classification.
-                </p>
+              <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '300px', color: 'var(--text-secondary)', opacity: 0.5}}>
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{marginBottom: '1rem'}}><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                <p>Upload a network flow record to begin analysis</p>
               </div>
             )}
-          </section>
+          </div>
         </div>
 
-        {/* RECENT INSPECTION LOG */}
-        {history.length > 0 && (
-          <section className="glass-panel log-section">
-            <div className="panel-header">
-              <div className="panel-title">
-                <span className="title-icon">📜</span>
-                <h3>Recent Inference Telemetry</h3>
-              </div>
-              <button className="clear-btn" onClick={() => setHistory([])}>
-                Clear History
-              </button>
-            </div>
-
-            <div className="table-responsive">
-              <table className="telemetry-table">
-                <thead>
-                  <tr>
-                    <th>Timestamp</th>
-                    <th>Init Win</th>
-                    <th>Fwd Max</th>
-                    <th>Tot Fwd Pkts</th>
-                    <th>Classical</th>
-                    <th>Quantum SVM</th>
-                    <th>Consensus</th>
-                    <th>Risk</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((item, idx) => (
-                    <tr key={idx} className={item.final === "ATTACK" ? "row-attack" : "row-benign"}>
-                      <td className="mono">{item.timestamp}</td>
-                      <td className="mono">{item.vector.init_win}</td>
-                      <td className="mono">{item.vector.fwd_max}</td>
-                      <td className="mono">{item.vector.total_fwd}</td>
-                      <td>
-                        <span className={`mini-pill ${item.classical === "ATTACK" ? "pill-attack" : "pill-benign"}`}>
-                          {item.classical}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`mini-pill ${item.quantum === "ATTACK" ? "pill-attack" : "pill-benign"}`}>
-                          {item.quantum}
-                        </span>
-                      </td>
-                      <td>
-                        <strong className={item.final === "ATTACK" ? "text-attack" : "text-benign"}>
-                          {item.final}
-                        </strong>
-                      </td>
-                      <td>
-                        <span className={`risk-tag ${item.risk.toLowerCase()}`}>{item.risk}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-      </main>
-
-      <footer className="footer">
-        <div>
-          🛡️ <strong>UC029 Quantum Intrusion Detection System</strong> • Quantum Computing & Machine Learning Fusion
-        </div>
-        <div className="footer-sub">
-          Qiskit Machine Learning • Fidelity Quantum Kernel • Scikit-Learn • React 19
-        </div>
-      </footer>
+      </div>
     </div>
   );
 }

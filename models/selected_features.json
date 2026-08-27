@@ -2,7 +2,7 @@
     "Init_Win_bytes_forward",
     "Fwd Packet Length Max",
     "Bwd Packet Length Max",
-    "Avg Fwd Segment Size",
+    "Fwd Packet Length Mean",
     "Avg Bwd Segment Size",
-    "Total Length of Fwd Packets"
+    "Subflow Fwd Bytes"
 ]
