@@ -20,98 +20,94 @@ MODEL_DIR = os.path.join(
 
 
 # ============================================================
-# LOAD MODELS
+# LAZY MODEL SINGLETON CACHE
 # ============================================================
+
+_rf_model = None
+_quantum_svm = None
+_quantum_scaler = None
+_quantum_kernel = None
+_X6_train_small = None
+_SELECTED_FEATURES = None
+
 
 def load_pickle(filename):
     """
     Load a saved model/object from the models directory.
     """
-
     path = os.path.join(
         MODEL_DIR,
         filename
     )
-
     if not os.path.exists(path):
         raise FileNotFoundError(
             f"File not found: {path}"
         )
-
     with open(path, "rb") as f:
         return pickle.load(f)
 
 
-# Classical model
-rf_model = load_pickle(
-    "rf_model_new.pkl"
-)
+def _init_models():
+    global _rf_model, _quantum_svm, _quantum_scaler, _quantum_kernel, _X6_train_small, _SELECTED_FEATURES
+    
+    if _rf_model is None:
+        _rf_model = load_pickle("rf_model_new.pkl")
+        _quantum_svm = load_pickle("quantum_svm_6.pkl")
+        _quantum_scaler = load_pickle("quantum_scaler_6.pkl")
+        _quantum_kernel = load_pickle("quantum_kernel_6.pkl")
 
-# Quantum SVM
-quantum_svm = load_pickle(
-    "quantum_svm_6.pkl"
-)
+        quantum_reference_path = os.path.join(MODEL_DIR, "X6_train_small.npy")
+        if not os.path.exists(quantum_reference_path):
+            raise FileNotFoundError(f"Quantum reference data not found: {quantum_reference_path}")
+        _X6_train_small = np.load(quantum_reference_path)
 
-# Quantum feature scaler
-quantum_scaler = load_pickle(
-    "quantum_scaler_6.pkl"
-)
+        selected_features_path = os.path.join(MODEL_DIR, "selected_features.json")
+        if not os.path.exists(selected_features_path):
+            raise FileNotFoundError(f"Selected features file not found: {selected_features_path}")
+        with open(selected_features_path, "r") as f:
+            _SELECTED_FEATURES = json.load(f)
 
-# Quantum kernel
-quantum_kernel = load_pickle(
-    "quantum_kernel_6.pkl"
-)
-
-
-# ============================================================
-# LOAD QUANTUM REFERENCE DATA
-# ============================================================
-
-quantum_reference_path = os.path.join(
-    MODEL_DIR,
-    "X6_train_small.npy"
-)
-
-if not os.path.exists(quantum_reference_path):
-    raise FileNotFoundError(
-        f"Quantum reference data not found: "
-        f"{quantum_reference_path}"
-    )
+    return _rf_model, _quantum_svm, _quantum_scaler, _quantum_kernel, _X6_train_small, _SELECTED_FEATURES
 
 
-X6_train_small = np.load(
-    quantum_reference_path
-)
+def get_selected_features():
+    global _SELECTED_FEATURES
+    if _SELECTED_FEATURES is None:
+        selected_features_path = os.path.join(MODEL_DIR, "selected_features.json")
+        if os.path.exists(selected_features_path):
+            with open(selected_features_path, "r") as f:
+                _SELECTED_FEATURES = json.load(f)
+        else:
+            _SELECTED_FEATURES = [
+                'Init_Win_bytes_forward',
+                'Fwd Packet Length Max',
+                'Bwd Packet Length Max',
+                'Fwd Packet Length Mean',
+                'Avg Bwd Segment Size',
+                'Subflow Fwd Bytes'
+            ]
+    return _SELECTED_FEATURES
 
 
-print(
-    "Quantum reference data:",
-    X6_train_small.shape
-)
+SELECTED_FEATURES = get_selected_features()
 
 
-# ============================================================
-# LOAD SELECTED QUANTUM FEATURES
-# ============================================================
-
-selected_features_path = os.path.join(
-    MODEL_DIR,
-    "selected_features.json"
-)
-
-if not os.path.exists(selected_features_path):
-    raise FileNotFoundError(
-        f"Selected features file not found: "
-        f"{selected_features_path}"
-    )
+class _ModelProxy:
+    def __getattr__(self, name):
+        rf, q_svm, q_scaler, q_kernel, x6_ref, selected = _init_models()
+        globals()['rf_model'] = rf
+        globals()['quantum_svm'] = q_svm
+        globals()['quantum_scaler'] = q_scaler
+        globals()['quantum_kernel'] = q_kernel
+        globals()['X6_train_small'] = x6_ref
+        return getattr(rf, name)
 
 
-with open(
-    selected_features_path,
-    "r"
-) as f:
-
-    SELECTED_FEATURES = json.load(f)
+rf_model = _ModelProxy()
+quantum_svm = None
+quantum_scaler = None
+quantum_kernel = None
+X6_train_small = None
 
 
 # ============================================================
@@ -132,27 +128,14 @@ def to_dataframe(input_data):
     """
     Convert supported input types into a pandas DataFrame.
     """
-
     if isinstance(input_data, dict):
-
-        return pd.DataFrame(
-            [input_data]
-        )
-
+        return pd.DataFrame([input_data])
     elif isinstance(input_data, pd.Series):
-
         return input_data.to_frame().T
-
     elif isinstance(input_data, pd.DataFrame):
-
         return input_data.copy()
-
     else:
-
-        raise TypeError(
-            "input_data must be "
-            "dict, pandas Series or pandas DataFrame"
-        )
+        raise TypeError("input_data must be dict, pandas Series or pandas DataFrame")
 
 
 # ============================================================
@@ -163,18 +146,10 @@ def validate_quantum_features(df):
     """
     Verify that all six Quantum ML features exist.
     """
-
-    missing = [
-        feature
-        for feature in SELECTED_FEATURES
-        if feature not in df.columns
-    ]
-
+    features = get_selected_features()
+    missing = [feature for feature in features if feature not in df.columns]
     if missing:
-
-        raise ValueError(
-            f"Missing quantum features: {missing}"
-        )
+        raise ValueError(f"Missing quantum features: {missing}")
 
 
 # ============================================================
@@ -184,85 +159,23 @@ def validate_quantum_features(df):
 def quantum_predict(input_data):
     """
     Perform Quantum SVM prediction.
-
-    Pipeline:
-
-    78 input features
-            ↓
-    Select 6 Quantum features
-            ↓
-       MinMaxScaler
-            ↓
-    FidelityQuantumKernel
-            ↓
-       Quantum SVM
-            ↓
-       BENIGN / ATTACK
     """
+    rf, q_svm, q_scaler, q_kernel, x6_ref, features = _init_models()
 
-    # Convert input to DataFrame
-    df = to_dataframe(
-        input_data
-    )
+    df = to_dataframe(input_data)
+    validate_quantum_features(df)
 
-    # Check required features
-    validate_quantum_features(
-        df
-    )
+    X6 = df[features].astype(float)
+    X6_scaled = q_scaler.transform(X6)
 
-    # --------------------------------------------------------
-    # Select exactly six features
-    # in the same order used during training
-    # --------------------------------------------------------
-
-    X6 = df[
-        SELECTED_FEATURES
-    ].astype(float)
-
-    # --------------------------------------------------------
-    # Scale features
-    #
-    # IMPORTANT:
-    # Keep this as a DataFrame so that the feature names
-    # remain available to the fitted MinMaxScaler.
-    # --------------------------------------------------------
-
-    X6_scaled = quantum_scaler.transform(
-        X6
-    )
-
-    # --------------------------------------------------------
-    # Quantum Kernel
-    #
-    # One input sample is compared against the
-    # 100 reference samples.
-    #
-    # Expected shape:
-    #
-    # (1, 100)
-    # --------------------------------------------------------
-
-    K_test = quantum_kernel.evaluate(
+    K_test = q_kernel.evaluate(
         x_vec=X6_scaled,
-        y_vec=X6_train_small
+        y_vec=x6_ref
     )
 
-    # --------------------------------------------------------
-    # Quantum SVM prediction
-    # --------------------------------------------------------
-
-    prediction = quantum_svm.predict(
-        K_test
-    )
-
-    prediction = int(
-        prediction[0]
-    )
-
-    label = LABEL_MAP.get(
-        prediction,
-        str(prediction)
-    )
+    prediction = q_svm.predict(K_test)
+    prediction = int(prediction[0])
+    label = LABEL_MAP.get(prediction, str(prediction))
 
     return prediction, label
 
@@ -274,68 +187,23 @@ def quantum_predict(input_data):
 def classical_predict(input_data):
     """
     Perform Random Forest prediction.
-
-    The Random Forest uses the original
-    78-feature network-flow input.
     """
+    rf, q_svm, q_scaler, q_kernel, x6_ref, features = _init_models()
 
-    # Convert input to DataFrame
-    df = to_dataframe(
-        input_data
-    )
+    df = to_dataframe(input_data)
 
-    # --------------------------------------------------------
-    # Check that the input contains the expected features
-    # --------------------------------------------------------
-
-    if hasattr(
-        rf_model,
-        "feature_names_in_"
-    ):
-
-        required_features = list(
-            rf_model.feature_names_in_
-        )
-
-        missing = [
-            feature
-            for feature in required_features
-            if feature not in df.columns
-        ]
-
+    if hasattr(rf, "feature_names_in_"):
+        required_features = list(rf.feature_names_in_)
+        missing = [f for f in required_features if f not in df.columns]
         if missing:
-
-            raise ValueError(
-                "Missing Random Forest features: "
-                f"{missing}"
-            )
-
-        # Preserve exact training feature order
-        X_classical = df[
-            required_features
-        ]
-
+            raise ValueError(f"Missing Random Forest features: {missing}")
+        X_classical = df[required_features]
     else:
-
-        # Fallback for models without feature names
         X_classical = df
 
-    # --------------------------------------------------------
-    # Random Forest prediction
-    # --------------------------------------------------------
-
-    prediction = rf_model.predict(
-        X_classical
-    )
-
-    prediction = int(
-        prediction[0]
-    )
-
-    label = LABEL_MAP.get(
-        prediction,
-        str(prediction)
-    )
+    prediction = rf.predict(X_classical)
+    prediction = int(prediction[0])
+    label = LABEL_MAP.get(prediction, str(prediction))
 
     return prediction, label
 
@@ -347,55 +215,16 @@ def classical_predict(input_data):
 def detect_intrusion(input_data):
     """
     Run both Classical and Quantum models.
-
-    Final decision:
-
-    If either model detects ATTACK:
-        Final = ATTACK
-        Risk = HIGH
-
-    If both models detect BENIGN:
-        Final = BENIGN
-        Risk = LOW
     """
+    classical_raw, classical_label = classical_predict(input_data)
+    quantum_raw, quantum_label = quantum_predict(input_data)
 
-    # --------------------------------------------------------
-    # Classical Random Forest
-    # --------------------------------------------------------
-
-    classical_raw, classical_label = classical_predict(
-        input_data
-    )
-
-    # --------------------------------------------------------
-    # Quantum SVM
-    # --------------------------------------------------------
-
-    quantum_raw, quantum_label = quantum_predict(
-        input_data
-    )
-
-    # --------------------------------------------------------
-    # Final decision
-    # --------------------------------------------------------
-
-    if (
-        classical_raw == 1
-        or
-        quantum_raw == 1
-    ):
-
+    if classical_raw == 1 or quantum_raw == 1:
         final_label = "ATTACK"
         risk_level = "HIGH"
-
     else:
-
         final_label = "BENIGN"
         risk_level = "LOW"
-
-    # --------------------------------------------------------
-    # Return structured result
-    # --------------------------------------------------------
 
     return {
         "classical_prediction": classical_label,
@@ -405,99 +234,8 @@ def detect_intrusion(input_data):
     }
 
 
-# ============================================================
-# SIMPLE TEST
-# ============================================================
-
 if __name__ == "__main__":
-
-    print(
-        "=" * 65
-    )
-
-    print(
-        "       UC029 QUANTUM INTRUSION DETECTION"
-    )
-
-    print(
-        "=" * 65
-    )
-
-    print(
-        "\nModels loaded successfully."
-    )
-
-    # --------------------------------------------------------
-    # Classical model
-    # --------------------------------------------------------
-
-    print(
-        "\nClassical model:"
-    )
-
-    print(
-        type(rf_model)
-    )
-
-    # --------------------------------------------------------
-    # Quantum SVM
-    # --------------------------------------------------------
-
-    print(
-        "\nQuantum SVM:"
-    )
-
-    print(
-        type(quantum_svm)
-    )
-
-    # --------------------------------------------------------
-    # Quantum Kernel
-    # --------------------------------------------------------
-
-    print(
-        "\nQuantum Kernel:"
-    )
-
-    print(
-        type(quantum_kernel)
-    )
-
-    # --------------------------------------------------------
-    # Selected features
-    # --------------------------------------------------------
-
-    print(
-        "\nSelected Quantum Features:"
-    )
-
-    for feature in SELECTED_FEATURES:
-
-        print(
-            " -",
-            feature
-        )
-
-    # --------------------------------------------------------
-    # Reference data
-    # --------------------------------------------------------
-
-    print(
-        "\nQuantum reference data shape:"
-    )
-
-    print(
-        X6_train_small.shape
-    )
-
-    # --------------------------------------------------------
-    # Ready
-    # --------------------------------------------------------
-
-    print(
-        "\nPrediction pipeline ready."
-    )
-
-    print(
-        "=" * 65
-    )
+    print("Testing prediction module...")
+    rf, q_svm, q_scaler, q_kernel, x6_ref, features = _init_models()
+    print("Models loaded successfully!")
+    print("Features:", features)
