@@ -2,10 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import './index.css';
 
-// Automatically detect API host or fallback to port 8000
-const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-  ? 'http://127.0.0.1:8000' 
-  : '';
+// Default API base URL configuration (prioritizing 8080, fallback 8000)
+const PRIMARY_API_URL = 'http://127.0.0.1:8080';
+const FALLBACK_API_URL = 'http://127.0.0.1:8000';
 
 const QUANTUM_FEATURES = [
   'Init_Win_bytes_forward',
@@ -17,6 +16,7 @@ const QUANTUM_FEATURES = [
 ];
 
 function App() {
+  const [apiBaseUrl, setApiBaseUrl] = useState(PRIMARY_API_URL);
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -51,33 +51,39 @@ function App() {
 
   // Check Health & Available Network Interfaces on load
   useEffect(() => {
-    checkHealth();
-    fetchInterfaces();
+    initBackendConnection();
   }, []);
 
-  const checkHealth = () => {
-    axios.get(`${API_BASE_URL}/health`)
-      .then(res => {
-        setStatus(res.data.status);
-        setTsharkPath(res.data.tshark_path);
-      })
-      .catch(() => {
-        // Retry secondary port 8080 if 8000 failed
-        axios.get('http://127.0.0.1:8080/health')
-          .then(res => {
-            setStatus(res.data.status);
-            setTsharkPath(res.data.tshark_path);
-          })
-          .catch(() => setStatus('OFFLINE'));
-      });
+  const initBackendConnection = async () => {
+    // Try primary port 8080 first
+    try {
+      const res = await axios.get(`${PRIMARY_API_URL}/health`, { timeout: 3000 });
+      setApiBaseUrl(PRIMARY_API_URL);
+      setStatus(res.data.status);
+      setTsharkPath(res.data.tshark_path);
+      fetchInterfaces(PRIMARY_API_URL);
+      return;
+    } catch (_) {}
+
+    // Try fallback port 8000
+    try {
+      const res = await axios.get(`${FALLBACK_API_URL}/health`, { timeout: 3000 });
+      setApiBaseUrl(FALLBACK_API_URL);
+      setStatus(res.data.status);
+      setTsharkPath(res.data.tshark_path);
+      fetchInterfaces(FALLBACK_API_URL);
+      return;
+    } catch (_) {}
+
+    setStatus('OFFLINE');
   };
 
-  const fetchInterfaces = () => {
-    axios.get(`${API_BASE_URL}/interfaces`)
+  const fetchInterfaces = (baseUrl) => {
+    const targetUrl = baseUrl || apiBaseUrl;
+    axios.get(`${targetUrl}/interfaces`)
       .then(res => {
         if (res.data.success && res.data.interfaces.length > 0) {
           setInterfaces(res.data.interfaces);
-          // Default to Wi-Fi or interface 4 if present
           const wifi = res.data.interfaces.find(i => i.name.toLowerCase().includes('wi-fi') || i.id === '4');
           if (wifi) {
             setSelectedInterface(wifi.id);
@@ -120,7 +126,7 @@ function App() {
       const stepTimer3 = setTimeout(() => setPipelineStep(4), captureDuration * 1000);
       const stepTimer4 = setTimeout(() => setPipelineStep(5), captureDuration * 1000 + 400);
 
-      const response = await axios.post(`${API_BASE_URL}/capture-live`, {
+      const response = await axios.post(`${apiBaseUrl}/capture-live`, {
         interface: selectedInterface,
         duration: captureDuration
       });
@@ -172,7 +178,7 @@ function App() {
     formData.append('file', file);
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/predict-file`, formData, {
+      const response = await axios.post(`${apiBaseUrl}/predict-file`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       
@@ -210,7 +216,7 @@ function App() {
     
     setTimeout(async () => {
       try {
-        const response = await axios.get(`${API_BASE_URL}/health`);
+        const response = await axios.get(`${apiBaseUrl}/health`);
         setPipelineStep(5);
         
         // Use demo sample
