@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "UC029 Quantum Intrusion Detection",
+  "version": "1.0.0",
+  "description": "Security monitoring extension interface for UC029 Hybrid Quantum-Classical Intrusion Detection System.",
+  "_comment_permissions": "activeTab and tabs permissions are used strictly to identify the current active domain in the dashboard header. host_permissions allow communication with the local FastAPI backend.",
+  "permissions": [
+    "activeTab",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8080/*",
+    "http://localhost:8080/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "UC029 Quantum Intrusion Detection"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

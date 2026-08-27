@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UC029 Quantum Intrusion Detection</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="extension-container">
+    <!-- HEADER -->
+    <header class="cyber-header">
+      <div class="brand-row">
+        <div class="brand-title-group">
+          <div class="quantum-icon-wrapper">
+            <span class="atom-core">⚛</span>
+          </div>
+          <div>
+            <h1 class="brand-title">UC029 Quantum IDS</h1>
+            <p class="brand-subtitle">Hybrid Quantum-Classical ML</p>
+          </div>
+        </div>
+        <div id="backend-status-pill" class="status-pill status-checking">
+          <span class="status-dot"></span>
+          <span id="backend-status-text">Checking API...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- DOMAIN CONTEXT BAR -->
+    <section class="domain-section">
+      <div class="domain-card">
+        <span class="domain-icon">🌐</span>
+        <div class="domain-info">
+          <span class="domain-label">Active Browser Domain</span>
+          <span id="active-domain-display" class="domain-name">Detecting domain...</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- DISCLAIMER NOTE -->
+    <div class="disclaimer-banner">
+      <span class="info-icon">ℹ</span>
+      <p class="disclaimer-text">
+        Domain detected via browser API. Network traffic captured via TShark and evaluated using Random Forest (78 features) + Quantum SVM (6 features).
+      </p>
+    </div>
+
+    <!-- CONTROLS & AUTO MONITOR -->
+    <section class="control-panel">
+      <div class="button-group">
+        <button id="start-capture-btn" class="btn btn-primary">
+          <span class="btn-icon">▶</span> Start Monitoring
+        </button>
+        <button id="refresh-btn" class="btn btn-secondary" title="Refresh Backend Status">
+          <span class="btn-icon">🔄</span> Refresh
+        </button>
+        <button id="open-dashboard-btn" class="btn btn-outline" title="Open Full Security Dashboard">
+          <span class="btn-icon">🖥</span> Open Dashboard
+        </button>
+      </div>
+
+      <div class="auto-monitor-row">
+        <label class="toggle-switch">
+          <input type="checkbox" id="auto-monitor-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label">Auto Monitor <small>(Every 15s)</small></span>
+        <span id="auto-monitor-indicator" class="pulse-indicator hidden">LIVE</span>
+      </div>
+    </section>
+
+    <!-- ERROR / ALERT CONTAINER -->
+    <div id="error-alert-box" class="alert-box hidden">
+      <span class="alert-icon">⚠️</span>
+      <span id="error-alert-message" class="alert-message">Backend Offline</span>
+    </div>
+
+    <!-- OVERALL RISK BANNER -->
+    <section class="risk-section">
+      <div id="risk-summary-card" class="risk-card risk-idle">
+        <div class="risk-header">
+          <span class="risk-card-label">OVERALL NETWORK RISK</span>
+          <span id="risk-level-badge" class="risk-badge badge-idle">IDLE</span>
+        </div>
+        <div class="risk-body">
+          <h2 id="risk-prediction-text" class="risk-prediction">SYSTEM IDLE</h2>
+          <p id="capture-info-text" class="capture-meta">No capture executed yet</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATS COUNTERS GRID -->
+    <section class="stats-grid">
+      <div class="stat-card">
+        <span class="stat-value" id="stat-total-flows">0</span>
+        <span class="stat-label">Total Flows</span>
+      </div>
+      <div class="stat-card stat-benign">
+        <span class="stat-value" id="stat-benign-flows">0</span>
+        <span class="stat-label">Benign</span>
+      </div>
+      <div class="stat-card stat-suspicious">
+        <span class="stat-value" id="stat-suspicious-flows">0</span>
+        <span class="stat-label">Suspicious</span>
+      </div>
+      <div class="stat-card stat-attack">
+        <span class="stat-value" id="stat-attack-flows">0</span>
+        <span class="stat-label">Attack</span>
+      </div>
+    </section>
+
+    <!-- FLOW BREAKDOWN TABLE -->
+    <section class="flows-section">
+      <div class="section-header">
+        <h3 class="section-title">Captured Flow Breakdown</h3>
+        <span id="flow-count-tag" class="count-tag">0 Flows</span>
+      </div>
+
+      <div id="flow-table-container" class="flow-table-wrapper">
+        <table class="flow-table">
+          <thead>
+            <tr>
+              <th>Flow ID</th>
+              <th>Src IP</th>
+              <th>Dst IP</th>
+              <th>Proto</th>
+              <th>Classical</th>
+              <th>Quantum</th>
+              <th>Final Result</th>
+              <th>Risk</th>
+            </tr>
+          </thead>
+          <tbody id="flow-table-body">
+            <tr>
+              <td colspan="8" class="table-placeholder">
+                Click <strong>"Start Monitoring"</strong> to capture live network traffic.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
