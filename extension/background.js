@@ -1,54 +1,116 @@
-/**
- * UC029 Quantum Intrusion Detection System
- * Background Service Worker (Manifest V3)
- *
- * PERMISSION JUSTIFICATIONS:
- * - 'activeTab' and 'tabs': Required to read active browser domain for display in security dashboard.
- * - 'host_permissions' (http://127.0.0.1:8080/*, http://localhost:8080/*): Required to communicate with local FastAPI backend.
- *
- * ARCHITECTURAL SECURITY NOTE:
- * The background worker and extension UI act solely as a local monitoring interface.
- * All PCAP capture, flow processing, and Quantum-Classical ML inference are handled
- * securely by the local FastAPI backend and TShark engine.
- */
+const API_BASE_URL = "http://127.0.0.1:8080";
 
-// Central API Base URL Configuration
-const API_BASE_URL = 'http://127.0.0.1:8080';
+let latestResult = null;
+let captureRunning = false;
 
-// Service Worker Lifecycle Initialization
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('[UC029 Extension] Service Worker installed successfully.');
-  updateExtensionBadge('READY', '#00f0ff');
-});
+console.log("[UC029] Background service worker loaded");
 
-// Helper function to update action badge state
-function updateExtensionBadge(text, color) {
-  try {
-    chrome.action.setBadgeText({ text });
-    chrome.action.setBadgeBackgroundColor({ color });
-  } catch (err) {
-    console.error('[UC029 Extension] Error updating badge:', err);
-  }
-}
-
-// Handle messages from popup script if background processing is required
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'CHECK_HEALTH') {
-    fetch(`${API_BASE_URL}/health`)
-      .then((res) => res.json())
-      .then((data) => {
-        updateExtensionBadge('OK', '#10b981');
-        sendResponse({ status: 'online', data });
-      })
-      .catch((err) => {
-        updateExtensionBadge('OFF', '#ef4444');
-        sendResponse({ status: 'offline', error: err.message });
-      });
-    return true; // Keep message channel open for async response
-  }
 
-  if (message.type === 'UPDATE_BADGE') {
-    updateExtensionBadge(message.text, message.color);
-    sendResponse({ success: true });
-  }
+    console.log("[UC029] Message received:", message);
+
+    if (message.type === "START_CAPTURE") {
+
+        if (captureRunning) {
+            sendResponse({
+                success: false,
+                error: "Capture already running"
+            });
+            return true;
+        }
+
+        captureRunning = true;
+
+        console.log("[UC029] Starting /capture-live...");
+
+        fetch(
+            `${API_BASE_URL}/capture-live`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                },
+                body: JSON.stringify({
+                    interface: "4",
+                    duration: 5,
+                    packet_count: null
+                })
+            }
+        )
+        .then(async response => {
+
+            console.log(
+                "[UC029] HTTP status:",
+                response.status
+            );
+
+            const data = await response.json();
+
+            console.log(
+                "[UC029] CAPTURE RESULT:",
+                data
+            );
+
+            if (!response.ok) {
+                throw new Error(
+                    data.detail || `HTTP ${response.status}`
+                );
+            }
+
+            latestResult = data;
+
+            await chrome.storage.local.set({
+                uc029_latest_result: data
+            });
+
+            sendResponse({
+                success: true,
+                result: data
+            });
+
+        })
+        .catch(error => {
+
+            console.error("[UC029] CAPTURE ERROR OBJECT:", error);
+            console.error("[UC029] ERROR NAME:", error?.name);
+            console.error("[UC029] ERROR MESSAGE:", error?.message);
+            console.error("[UC029] ERROR STACK:", error?.stack);
+
+            sendResponse({
+                success: false,
+                error: error?.message || "Unknown capture error",
+                error_name: error?.name || "UnknownError"
+            });
+        })
+        .finally(() => {
+
+            captureRunning = false;
+
+            console.log(
+                "[UC029] Capture finished"
+            );
+        });
+
+        return true;
+    }
+
+
+    if (message.type === "GET_LATEST_RESULT") {
+
+        chrome.storage.local.get(
+            ["uc029_latest_result"],
+            data => {
+
+                sendResponse({
+                    success: true,
+                    result:
+                        data.uc029_latest_result ||
+                        null
+                });
+            }
+        );
+
+        return true;
+    }
 });
