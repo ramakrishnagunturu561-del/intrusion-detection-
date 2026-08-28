@@ -26,3 +26,5 @@ data/raw/*.pcapng
 
 # Python cache
 .pytest_cache/
+
+test_live.pcapng
