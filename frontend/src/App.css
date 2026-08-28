@@ -132,6 +132,7 @@ body {
 .gradient-text {
   background: linear-gradient(135deg, #38bdf8, #818cf8, #c084fc);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -798,4 +799,27 @@ body {
     flex-direction: column;
     text-align: center;
   }
+}
+.banner-suspicious {
+  border-color: #f59e0b;
+}
+
+.risk-medium-glow {
+  border-color: #f59e0b;
+  color: #f59e0b;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
+}
+
+.badge-result-suspicious {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.row-suspicious {
+  background: rgba(245, 158, 11, 0.05);
 }

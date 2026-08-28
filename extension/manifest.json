@@ -3,15 +3,14 @@
   "name": "UC029 Quantum Intrusion Detection",
   "version": "1.0.0",
   "description": "Security monitoring extension interface for UC029 Hybrid Quantum-Classical Intrusion Detection System.",
-  "_comment_permissions": "activeTab and tabs identify the current active domain. storage keeps capture results available after the popup closes. host_permissions allow communication with the local FastAPI backend.",
   "permissions": [
     "activeTab",
     "tabs",
     "storage"
   ],
   "host_permissions": [
-    "http://127.0.0.1:8080/*",
-    "http://localhost:8080/*"
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*"
   ],
   "action": {
     "default_popup": "popup.html",

@@ -3,8 +3,8 @@ import axios from 'axios';
 import './index.css';
 
 // Default API base URL configuration (prioritizing 8080, fallback 8000)
-const PRIMARY_API_URL = 'http://127.0.0.1:8080';
-const FALLBACK_API_URL = 'http://127.0.0.1:8000';
+const PRIMARY_API_URL = 'http://127.0.0.1:8000';
+const FALLBACK_API_URL = 'http://127.0.0.1:8080';
 
 const QUANTUM_FEATURES = [
   'Init_Win_bytes_forward',
@@ -661,23 +661,9 @@ function App() {
                       </div>
                     </div>
                   </div>
-
-                  {result.final_prediction === 'ATTACK' && (
-                    <div className="important-alert">
-                      <strong>⚠️ IMPORTANT SECURITY ALERT:</strong> Potential intrusion detected by Quantum-Classical ensemble! High risk protocol initiated.
-                    </div>
-                  )}
-
-                  <div className="decision-note">
-                    <strong>Hybrid Decision Rule:</strong> If either Classical RF or Quantum SVM triggers an anomaly threshold, final consensus is escalated to High Risk to prevent zero-day bypasses.
-                  </div>
                 </div>
               ) : (
-                <div className="empty-state">
-                  <div className="empty-icon">🛡️</div>
-                  <h3>Ready for Network Flow Analysis</h3>
-                  <p>Upload a PCAP / JSON / CSV flow or click "Run Sample Demo" to evaluate classical and quantum ML inference.</p>
-                </div>
+                <p>Upload a PCAP / JSON / CSV flow or click "Run Sample Demo" to evaluate classical and quantum ML inference.</p>
               )}
             </div>
 
