@@ -35,6 +35,13 @@ function App() {
 
   // Flow details modal state
   const [selectedFlowDetails, setSelectedFlowDetails] = useState(null);
+  const [featureSearchQuery, setFeatureSearchQuery] = useState('');
+  const [activeInfoModal, setActiveInfoModal] = useState(null);
+
+  const closeDetailsModal = () => {
+    setSelectedFlowDetails(null);
+    setFeatureSearchQuery('');
+  };
 
   // Live capture results
   const [captureSummary, setCaptureSummary] = useState(null);
@@ -119,28 +126,39 @@ function App() {
     // Step 1: User clicks Live Network Capture -> TShark starting
     setPipelineStep(1);
 
+    // Transition to capturing (Step 2) after 600ms
+    const stepTimer1 = setTimeout(() => setPipelineStep(2), 600);
+
     try {
-      // Simulate pipeline UI progress while backend TShark captures
-      const stepTimer1 = setTimeout(() => setPipelineStep(2), captureDuration * 500);
-      const stepTimer2 = setTimeout(() => setPipelineStep(3), captureDuration * 800);
-      const stepTimer3 = setTimeout(() => setPipelineStep(4), captureDuration * 1000);
-      const stepTimer4 = setTimeout(() => setPipelineStep(5), captureDuration * 1000 + 400);
+      console.log(`[Capture] Started capture request. Interface: ${selectedInterface}, Duration: ${captureDuration}s`);
 
       const response = await axios.post(`${apiBaseUrl}/capture-live`, {
         interface: selectedInterface,
         duration: captureDuration
       });
 
+      // Clear capturing timer
       clearTimeout(stepTimer1);
-      clearTimeout(stepTimer2);
-      clearTimeout(stepTimer3);
-      clearTimeout(stepTimer4);
-
-      setPipelineStep(6); // Result ready
 
       const resData = response.data;
+      console.log('[Capture] Response received:', resData);
+      console.log(`[Capture] Response flow count: ${resData.flows ? resData.flows.length : 0}`);
+
+      // Smooth step-by-step playback of the remaining pipeline steps
+      setPipelineStep(3); // PCAP Generated
+      await new Promise(resolve => setTimeout(resolve, 400));
+
+      setPipelineStep(4); // 78-Feature Extraction
+      await new Promise(resolve => setTimeout(resolve, 400));
+
+      setPipelineStep(5); // Random Forest + Q-SVM
+      await new Promise(resolve => setTimeout(resolve, 400));
+
+      setPipelineStep(6); // Verdict & Risk display
+
       setCaptureSummary(resData);
       setCapturedFlows(resData.flows || []);
+      console.log(`[Capture] Rendering flow count: ${resData.flows ? resData.flows.length : 0}`);
 
       // Add record to history
       const now = new Date().toTimeString().split(' ')[0];
@@ -148,17 +166,19 @@ function App() {
         id: Date.now(),
         time: now,
         source: `Live Capture (If: ${selectedInterface}, ${resData.total_flows_analyzed} flows)`,
-        classical: resData.overall_prediction,
-        quantum: resData.overall_prediction,
-        result: resData.overall_prediction === 'ATTACK' ? 'ATTACK DETECTED' : 'BENIGN',
-        risk: resData.overall_risk_level
+        classical: resData.overall_prediction || 'N/A',
+        quantum: resData.overall_prediction || 'N/A',
+        result: (resData.overall_prediction || resData.final_prediction) === 'ATTACK' ? 'ATTACK DETECTED' : 'BENIGN',
+        risk: resData.overall_risk_level || resData.risk_level || 'LOW'
       };
       setHistory(prev => [newHistoryItem, ...prev]);
 
     } catch (err) {
+      console.error('[Capture] Capture failed:', err);
       setError(err.response?.data?.detail || err.message || 'Error executing TShark live capture.');
       setPipelineStep(0);
     } finally {
+      clearTimeout(stepTimer1);
       setLoading(false);
     }
   };
@@ -178,30 +198,35 @@ function App() {
     formData.append('file', file);
 
     try {
+      console.log(`[File Analysis] Uploading file: ${file.name}`);
       const response = await axios.post(`${apiBaseUrl}/predict-file`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       
       const resData = response.data;
+      console.log('[File Analysis] Response received:', resData);
       setResult(resData);
       if (resData.flows) {
         setCapturedFlows(resData.flows);
+        console.log(`[File Analysis] Extracted flow count: ${resData.flows.length}`);
       }
       setPipelineStep(6);
 
       const now = new Date().toTimeString().split(' ')[0];
+      const isPCAP = file.name.toLowerCase().endsWith('.pcap') || file.name.toLowerCase().endsWith('.pcapng');
       const newEntry = {
         id: Date.now(),
         time: now,
         source: file.name,
-        classical: resData.classical_prediction,
-        quantum: resData.quantum_prediction,
-        result: resData.final_prediction === 'ATTACK' ? 'ATTACK DETECTED' : 'BENIGN',
-        risk: resData.risk_level
+        classical: isPCAP ? 'MULTIPLE' : (resData.classical_prediction || 'N/A'),
+        quantum: isPCAP ? 'MULTIPLE' : (resData.quantum_prediction || 'N/A'),
+        result: (resData.final_prediction || resData.overall_prediction) === 'ATTACK' ? 'ATTACK DETECTED' : 'BENIGN',
+        risk: resData.risk_level || resData.overall_risk_level || 'LOW'
       };
       setHistory(prev => [newEntry, ...prev]);
 
     } catch (err) {
+      console.error('[File Analysis] File prediction failed:', err);
       setError(err.response?.data?.detail || err.message || 'An error occurred during file analysis');
       setPipelineStep(0);
     } finally {
@@ -255,9 +280,36 @@ function App() {
 
       {/* PIPELINE ARCHITECTURE VISUALIZER */}
       <section className="pipeline-container glass-panel">
-        <div className="pipeline-title">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-          Live Quantum-Classical Detection Pipeline Execution
+        <div className="pipeline-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            Live Quantum-Classical Detection Pipeline Execution
+          </div>
+          <span className="pipeline-status-text" style={{
+            fontSize: '0.8rem',
+            fontWeight: 'bold',
+            letterSpacing: '0.05em',
+            padding: '4px 12px',
+            borderRadius: '12px',
+            border: '1px solid',
+            background: pipelineStep === 0 ? 'rgba(148, 163, 184, 0.1)' :
+                        pipelineStep <= 2 ? 'rgba(59, 130, 246, 0.1)' :
+                        pipelineStep <= 5 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+            color: pipelineStep === 0 ? '#94a3b8' :
+                   pipelineStep <= 2 ? '#3b82f6' :
+                   pipelineStep <= 5 ? '#f59e0b' : '#10b981',
+            borderColor: pipelineStep === 0 ? 'rgba(148, 163, 184, 0.2)' :
+                         pipelineStep <= 2 ? 'rgba(59, 130, 246, 0.3)' :
+                         pipelineStep <= 5 ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)',
+            boxShadow: pipelineStep === 0 ? 'none' :
+                       pipelineStep <= 2 ? '0 0 8px rgba(59, 130, 246, 0.2)' :
+                       pipelineStep <= 5 ? '0 0 8px rgba(245, 158, 11, 0.2)' : '0 0 8px rgba(16, 185, 129, 0.2)'
+          }}>
+            {pipelineStep === 0 && 'STATUS: IDLE'}
+            {pipelineStep > 0 && pipelineStep <= 2 && 'STATUS: CAPTURING'}
+            {pipelineStep >= 3 && pipelineStep <= 5 && 'STATUS: PROCESSING'}
+            {pipelineStep === 6 && 'STATUS: RESULT READY'}
+          </span>
         </div>
         
         <div className="pipeline-steps">
@@ -311,7 +363,7 @@ function App() {
 
       {/* DASHBOARD STATISTICS CARDS */}
       <section className="stats-grid">
-        <div className="stat-card">
+        <div className="stat-card" onClick={() => setActiveInfoModal("features_78")}>
           <div className="stat-icon icon-network">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 11a9 9 0 0 1 9 9"></path><path d="M4 4a16 16 0 0 1 16 16"></path><circle cx="5" cy="19" r="1"></circle></svg>
           </div>
@@ -321,7 +373,7 @@ function App() {
           </div>
         </div>
 
-        <div className="stat-card">
+        <div className="stat-card" onClick={() => setActiveInfoModal("quantum_6")}>
           <div className="stat-icon icon-quantum">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"></circle><path d="M12 21a9 9 0 0 0 9-9 9 9 0 0 0-9-9 9 9 0 0 0-9 9 9 9 0 0 0 9 9z"></path><path d="M12 3v3M12 18v3M3 12h3M18 12h3"></path></svg>
           </div>
@@ -331,7 +383,7 @@ function App() {
           </div>
         </div>
 
-        <div className="stat-card">
+        <div className="stat-card" onClick={() => setActiveInfoModal("ensemble_2")}>
           <div className="stat-icon icon-engine">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
           </div>
@@ -341,7 +393,7 @@ function App() {
           </div>
         </div>
 
-        <div className="stat-card">
+        <div className="stat-card" onClick={() => setActiveInfoModal("ref_100")}>
           <div className="stat-icon icon-ref">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
           </div>
@@ -435,7 +487,7 @@ function App() {
                 {loading ? (
                   <>
                     <span className="loading-spinner"></span>
-                    Capturing Packets via TShark...
+                    {pipelineStep <= 2 ? "CAPTURING PACKETS VIA TSHARK..." : "PROCESSING ML MODELS..."}
                   </>
                 ) : (
                   <>
@@ -481,6 +533,35 @@ function App() {
               </div>
             )}
 
+            {/* LIVE CAPTURE PERFORMANCE TIMELINE */}
+            {captureSummary && captureSummary.timings && (
+              <div className="glass-panel" style={{ marginTop: '1.25rem', padding: '1.25rem' }}>
+                <div className="timing-timeline-title">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                  Pipeline Performance Breakdown (Total: {captureSummary.timings.total_pipeline_ms.toFixed(1)} ms)
+                </div>
+                <div className="timing-timeline-grid">
+                  {[
+                    { label: 'TShark Startup', val: captureSummary.timings.tshark_startup_ms, color: '#60a5fa' },
+                    { label: 'TShark Capture', val: captureSummary.timings.tshark_capture_ms, color: '#93c5fd' },
+                    { label: 'PCAP Parsing', val: captureSummary.timings.pcap_reading_ms, color: '#34d399' },
+                    { label: 'Flow Grouping', val: captureSummary.timings.flow_construction_ms, color: '#10b981' },
+                    { label: 'Feature Extraction', val: captureSummary.timings.feature_extraction_ms, color: '#f59e0b' },
+                    { label: 'Random Forest', val: captureSummary.timings.random_forest_pred_ms, color: '#c084fc' },
+                    { label: 'Quantum SVM', val: captureSummary.timings.quantum_svm_pred_ms, color: '#a78bfa' },
+                    { label: 'Decision Logic', val: captureSummary.timings.hybrid_decision_ms, color: '#f472b6' }
+                  ].map((t, idx) => (
+                    <div key={idx} className="timing-card" style={{ '--card-glow': t.color }}>
+                      <div className="timing-card-label">{t.label}</div>
+                      <div className="timing-card-value" style={{ color: t.color }}>
+                        {t.val !== undefined ? `${t.val.toFixed(1)} ms` : '0.0 ms'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* FLOWS TABLE */}
             <div className="table-responsive" style={{marginTop: '1.5rem'}}>
               <table className="history-table live-table">
@@ -490,10 +571,10 @@ function App() {
                     <th>Source IP:Port</th>
                     <th>Destination IP:Port</th>
                     <th>Proto</th>
+                    <th>Application</th>
                     <th>Packets</th>
                     <th>Classical RF</th>
                     <th>Quantum SVM</th>
-                    <th>Final Verdict</th>
                     <th>Risk</th>
                     <th>Action</th>
                   </tr>
@@ -506,6 +587,7 @@ function App() {
                         <td>{flow.src_ip}:{flow.src_port}</td>
                         <td>{flow.dst_ip}:{flow.dst_port}</td>
                         <td><span className="proto-badge">{flow.protocol}</span></td>
+                        <td><span style={{ fontFamily: 'monospace', color: '#60a5fa', fontWeight: 'bold' }}>{flow.process_name || 'N/A'}</span></td>
                         <td>{flow.packets_count}</td>
                         <td>
                           <span className={flow.classical_prediction === 'ATTACK' ? 'text-attack' : 'text-benign'}>
@@ -518,13 +600,6 @@ function App() {
                           </span>
                         </td>
                         <td>
-                          {flow.final_prediction === 'ATTACK' ? (
-                            <span className="badge-result-attack">🔴 ATTACK</span>
-                          ) : (
-                            <span className="badge-result-benign">🟢 BENIGN</span>
-                          )}
-                        </td>
-                        <td>
                           <span className={`risk-tag ${flow.risk_level === 'HIGH' ? 'risk-tag-high' : 'risk-tag-low'}`}>
                             {flow.risk_level}
                           </span>
@@ -534,7 +609,7 @@ function App() {
                             className="btn-inspect"
                             onClick={() => setSelectedFlowDetails(flow)}
                           >
-                            Inspect 78 Features
+                            Inspect
                           </button>
                         </td>
                       </tr>
@@ -542,7 +617,19 @@ function App() {
                   ) : (
                     <tr>
                       <td colSpan="10" style={{textAlign: 'center', padding: '2rem', color: '#94a3b8'}}>
-                        Click <strong>"START LIVE NETWORK CAPTURE"</strong> above to capture live packets via TShark and extract features.
+                        {captureSummary ? (
+                          <div style={{color: '#f59e0b', fontWeight: '500'}}>
+                            ⚠️ No active network flows were captured during the {captureDuration}-second window. 
+                            <br />
+                            <span style={{fontSize: '0.85rem', fontWeight: 'normal', color: '#94a3b8', display: 'block', marginTop: '0.5rem'}}>
+                              Please ensure you are connected to the internet and generating active traffic (e.g. open a webpage) during the capture.
+                            </span>
+                          </div>
+                        ) : (
+                          <>
+                            Click <strong>"START LIVE NETWORK CAPTURE"</strong> above to capture live packets via TShark and extract features.
+                          </>
+                        )}
                       </td>
                     </tr>
                   )}
@@ -625,42 +712,164 @@ function App() {
                 Detection Results
               </h2>
 
-              {result ? (
+               {result ? (
                 <div className="results-container">
-                  <div className="results-grid">
-                    <div className="result-card">
-                      <div className="card-label">CLASSICAL ML</div>
-                      <div className="card-sub">Random Forest (78 Features)</div>
-                      <div className={`prediction-value ${result.classical_prediction === 'ATTACK' ? 'value-attack' : 'value-benign'}`}>
-                        {result.classical_prediction === 'ATTACK' ? '🔴 ATTACK' : '🟢 BENIGN'}
+                  {result.flows ? (
+                    /* Render PCAP upload summary and stats */
+                    <>
+                      <div className="results-grid">
+                        <div className="result-card">
+                          <div className="card-label">TOTAL FLOWS</div>
+                          <div className="card-sub">Analyzed in PCAP</div>
+                          <div className="prediction-value text-benign">
+                            {result.total_flows_analyzed}
+                          </div>
+                        </div>
+                        <div className="result-card">
+                          <div className="card-label">ATTACK FLOWS</div>
+                          <div className="card-sub">Detected by Ensemble</div>
+                          <div className={`prediction-value ${result.attack_flows_detected > 0 ? 'value-attack' : 'value-benign'}`}>
+                            {result.attack_flows_detected}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    
-                    <div className="result-card">
-                      <div className="card-label">QUANTUM ML</div>
-                      <div className="card-sub">Quantum SVM (6 Features)</div>
-                      <div className={`prediction-value ${result.quantum_prediction === 'ATTACK' ? 'value-attack' : 'value-benign'}`}>
-                        {result.quantum_prediction === 'ATTACK' ? '🔴 ATTACK' : '🟢 BENIGN'}
-                      </div>
-                    </div>
-                  </div>
 
-                  {/* FINAL RESULT HIGHLIGHT */}
-                  <div className={`final-result-banner ${result.final_prediction === 'ATTACK' ? 'banner-attack' : 'banner-benign'}`}>
-                    <div className="result-main-group">
-                      <div className="banner-title">FINAL ENSEMBLE RESULT</div>
-                      <div className="banner-status">
-                        {result.final_prediction === 'ATTACK' ? '🔴 ATTACK DETECTED' : '🟢 BENIGN'}
-                      </div>
-                    </div>
+                      <div className={`final-result-banner ${result.overall_prediction === 'ATTACK' ? 'banner-attack' : 'banner-benign'}`}>
+                        <div className="result-main-group">
+                          <div className="banner-title">PCAP OVERALL VERDICT</div>
+                          <div className="banner-status">
+                            {result.overall_prediction === 'ATTACK' ? '🔴 ATTACK DETECTED IN FLOWS' : '🟢 ALL FLOWS BENIGN'}
+                          </div>
+                          <div style={{fontSize: '0.85rem', opacity: 0.9, marginTop: '4px'}}>
+                            Analyzed {result.total_flows_analyzed} network flows ({result.attack_flows_detected} Attacks, {result.benign_flows_detected} Benign)
+                          </div>
+                        </div>
 
-                    <div className="result-risk-group">
-                      <div className="banner-title">RISK EVALUATION</div>
-                      <div className={`risk-badge ${result.risk_level === 'HIGH' ? 'risk-high-glow' : 'risk-low-glow'}`}>
-                        {result.risk_level === 'HIGH' ? 'HIGH RISK' : 'LOW RISK'}
+                        <div className="result-risk-group">
+                          <div className="banner-title">RISK LEVEL</div>
+                          <div className={`risk-badge ${result.risk_level === 'HIGH' ? 'risk-high-glow' : 'risk-low-glow'}`}>
+                            {result.risk_level === 'HIGH' ? 'HIGH RISK' : 'LOW RISK'}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
+
+                      {/* UPLOAD FILE PERFORMANCE TIMELINE */}
+                      {result && result.timings && (
+                        <div className="glass-panel" style={{ marginTop: '1.25rem', padding: '1.25rem' }}>
+                          <div className="timing-timeline-title">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                            Pipeline Performance Breakdown (Total: {result.timings.total_pipeline_ms.toFixed(1)} ms)
+                          </div>
+                          <div className="timing-timeline-grid">
+                            {[
+                              { label: 'PCAP Reading', val: result.timings.pcap_reading_ms, color: '#34d399' },
+                              { label: 'Flow Grouping', val: result.timings.flow_construction_ms, color: '#10b981' },
+                              { label: 'Feature Extraction', val: result.timings.feature_extraction_ms, color: '#f59e0b' },
+                              { label: 'Random Forest', val: result.timings.random_forest_pred_ms, color: '#c084fc' },
+                              { label: 'Quantum SVM', val: result.timings.quantum_svm_pred_ms, color: '#a78bfa' },
+                              { label: 'Decision Logic', val: result.timings.hybrid_decision_ms, color: '#f472b6' }
+                            ].map((t, idx) => (
+                              <div key={idx} className="timing-card" style={{ '--card-glow': t.color }}>
+                                <div className="timing-card-label">{t.label}</div>
+                                <div className="timing-card-value" style={{ color: t.color }}>
+                                  {t.val !== undefined ? `${t.val.toFixed(1)} ms` : '0.0 ms'}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Flows table for PCAP upload */}
+                      <h3 style={{marginTop: '1.5rem', color: '#94a3b8', fontSize: '1rem'}}>PCAP Extracted Flows:</h3>
+                      <div className="table-responsive" style={{maxHeight: '400px', overflowY: 'auto'}}>
+                        <table className="history-table live-table">
+                          <thead>
+                            <tr>
+                              <th>Flow ID</th>
+                              <th>Source IP:Port</th>
+                              <th>Destination IP:Port</th>
+                              <th>Proto</th>
+                              <th>Application</th>
+                              <th>Packets</th>
+                              <th>Risk</th>
+                              <th>Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {result.flows.length > 0 ? (
+                              result.flows.map((flow) => (
+                                <tr key={flow.flow_id} className={flow.final_prediction === 'ATTACK' ? 'row-attack' : ''}>
+                                  <td className="packet-id">{flow.flow_id}</td>
+                                  <td>{flow.src_ip}:{flow.src_port}</td>
+                                  <td>{flow.dst_ip}:{flow.dst_port}</td>
+                                  <td><span className="proto-badge">{flow.protocol}</span></td>
+                                  <td><span style={{ fontFamily: 'monospace', color: '#94a3b8' }}>{flow.process_name || 'N/A'}</span></td>
+                                  <td>{flow.packets_count}</td>
+                                  <td>
+                                    <span className={`risk-tag ${flow.risk_level === 'HIGH' ? 'risk-tag-high' : 'risk-tag-low'}`}>
+                                      {flow.risk_level}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <button 
+                                      className="btn-inspect"
+                                      onClick={() => setSelectedFlowDetails(flow)}
+                                    >
+                                      Inspect
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td colSpan="8" style={{textAlign: 'center', padding: '1rem', color: '#94a3b8'}}>
+                                  No flows extracted from the PCAP file.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  ) : (
+                    /* Render Single JSON/CSV record */
+                    <>
+                      <div className="results-grid">
+                        <div className="result-card">
+                          <div className="card-label">CLASSICAL ML</div>
+                          <div className="card-sub">Random Forest (78 Features)</div>
+                          <div className={`prediction-value ${result.classical_prediction === 'ATTACK' ? 'value-attack' : 'value-benign'}`}>
+                            {result.classical_prediction === 'ATTACK' ? '🔴 ATTACK' : '🟢 BENIGN'}
+                          </div>
+                        </div>
+                        
+                        <div className="result-card">
+                          <div className="card-label">QUANTUM ML</div>
+                          <div className="card-sub">Quantum SVM (6 Features)</div>
+                          <div className={`prediction-value ${result.quantum_prediction === 'ATTACK' ? 'value-attack' : 'value-benign'}`}>
+                            {result.quantum_prediction === 'ATTACK' ? '🔴 ATTACK' : '🟢 BENIGN'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className={`final-result-banner ${result.final_prediction === 'ATTACK' ? 'banner-attack' : 'banner-benign'}`}>
+                        <div className="result-main-group">
+                          <div className="banner-title">FINAL ENSEMBLE RESULT</div>
+                          <div className="banner-status">
+                            {result.final_prediction === 'ATTACK' ? '🔴 ATTACK DETECTED' : '🟢 BENIGN'}
+                          </div>
+                        </div>
+
+                        <div className="result-risk-group">
+                          <div className="banner-title">RISK EVALUATION</div>
+                          <div className={`risk-badge ${result.risk_level === 'HIGH' ? 'risk-high-glow' : 'risk-low-glow'}`}>
+                            {result.risk_level === 'HIGH' ? 'HIGH RISK' : 'LOW RISK'}
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : (
                 <p>Upload a PCAP / JSON / CSV flow or click "Run Sample Demo" to evaluate classical and quantum ML inference.</p>
@@ -725,11 +934,11 @@ function App() {
 
       {/* 78-FEATURE INSPECTION MODAL */}
       {selectedFlowDetails && (
-        <div className="modal-overlay" onClick={() => setSelectedFlowDetails(null)}>
+        <div className="modal-overlay" onClick={closeDetailsModal}>
           <div className="modal-content glass-panel" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Extracted 78-Feature Vector - {selectedFlowDetails.flow_id}</h3>
-              <button className="btn-close" onClick={() => setSelectedFlowDetails(null)}>✕</button>
+              <button className="btn-close" onClick={closeDetailsModal}>✕</button>
             </div>
             
             <div className="modal-meta-grid">
@@ -747,7 +956,46 @@ function App() {
               ))}
             </div>
 
-            <h4 style={{marginTop: '1.25rem', color: '#94a3b8'}}>All 78 Extracted CICIDS Features:</h4>
+            <div style={{marginTop: '1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'between', flexWrap: 'wrap', gap: '8px'}}>
+              <h4 style={{color: '#94a3b8', margin: 0}}>All 78 Extracted CICIDS Features:</h4>
+              <div style={{position: 'relative', flex: '1', minWidth: '200px'}}>
+                <input 
+                  type="text" 
+                  placeholder="Search features (e.g. Fwd, Bwd, Packet Length...)"
+                  value={featureSearchQuery}
+                  onChange={e => setFeatureSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    background: 'rgba(0,0,0,0.25)',
+                    border: '1px solid var(--border-color)',
+                    color: 'white',
+                    borderRadius: '6px',
+                    padding: '6px 12px 6px 30px',
+                    fontSize: '0.85rem'
+                  }}
+                />
+                <span style={{position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#64748b', fontSize: '0.9rem'}}>🔍</span>
+                {featureSearchQuery && (
+                  <button 
+                    onClick={() => setFeatureSearchQuery('')}
+                    style={{
+                      position: 'absolute',
+                      right: '8px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#94a3b8',
+                      cursor: 'pointer',
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+            
             <div className="features-scroll-table">
               <table>
                 <thead>
@@ -757,14 +1005,195 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(selectedFlowDetails.all_features || {}).map(([k, v]) => (
-                    <tr key={k}>
-                      <td className="feat-name">{k}</td>
-                      <td className="feat-val">{typeof v === 'number' ? v.toFixed(4) : String(v)}</td>
-                    </tr>
-                  ))}
+                  {Object.entries(selectedFlowDetails.all_features || {})
+                    .filter(([k, v]) => k.toLowerCase().includes(featureSearchQuery.toLowerCase()))
+                    .map(([k, v]) => (
+                      <tr key={k}>
+                        <td className="feat-name">{k}</td>
+                        <td className="feat-val">{typeof v === 'number' ? v.toFixed(4) : String(v)}</td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* INTERACTIVE METRIC DETAIL MODALS */}
+      {activeInfoModal && (
+        <div className="modal-overlay" onClick={() => setActiveInfoModal(null)}>
+          <div className="modal-content glass-panel" style={{ maxWidth: '600px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              {activeInfoModal === 'features_78' && <h3>78 CICIDS Flow Features List</h3>}
+              {activeInfoModal === 'quantum_6' && <h3>6 Selected Quantum Features</h3>}
+              {activeInfoModal === 'ensemble_2' && <h3>Ensemble Models & Decision Policy</h3>}
+              {activeInfoModal === 'ref_100' && <h3>100 Quantum Reference States</h3>}
+              <button className="btn-close" onClick={() => setActiveInfoModal(null)}>✕</button>
+            </div>
+
+            <div className="modal-body" style={{ marginTop: '1rem', maxHeight: '400px', overflowY: 'auto', paddingRight: '4px' }}>
+              {activeInfoModal === 'features_78' && (
+                <div>
+                  <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem', fontSize: '0.9rem' }}>
+                    The system extracts 78 standard network flow features based on the CICIDS2017 dataset schema. Clicking <strong>Inspect</strong> on any flow in the table below displays their extracted values.
+                  </p>
+                  <div className="features-scroll-table" style={{ maxHeight: '250px' }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Feature Name</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[
+                          "Destination Port", "Flow Duration", "Total Fwd Packets", "Total Backward Packets",
+                          "Total Length of Fwd Packets", "Total Length of Bwd Packets", "Fwd Packet Length Max",
+                          "Fwd Packet Length Min", "Fwd Packet Length Mean", "Fwd Packet Length Std",
+                          "Bwd Packet Length Max", "Bwd Packet Length Min", "Bwd Packet Length Mean",
+                          "Bwd Packet Length Std", "Flow Bytes/s", "Flow Packets/s", "Flow IAT Mean",
+                          "Flow IAT Std", "Flow IAT Max", "Flow IAT Min", "Fwd IAT Total",
+                          "Fwd IAT Mean", "Fwd IAT Std", "Fwd IAT Max", "Fwd IAT Min",
+                          "Bwd IAT Total", "Bwd IAT Mean", "Bwd IAT Std", "Bwd IAT Max",
+                          "Bwd IAT Min", "Fwd PSH Flags", "Bwd PSH Flags", "Fwd URG Flags",
+                          "Bwd URG Flags", "Fwd Header Length", "Bwd Header Length", "Fwd Packets/s",
+                          "Bwd Packets/s", "Min Packet Length", "Max Packet Length", "Packet Length Mean",
+                          "Packet Length Std", "Packet Length Variance", "FIN Flag Count", "SYN Flag Count",
+                          "RST Flag Count", "PSH Flag Count", "ACK Flag Count", "URG Flag Count",
+                          "CWE Flag Count", "ECE Flag Count", "Down/Up Ratio", "Average Packet Size",
+                          "Avg Fwd Segment Size", "Avg Bwd Segment Size", "Fwd Header Length.1",
+                          "Fwd Avg Bytes/Bulk", "Fwd Avg Packets/Bulk", "Fwd Avg Bulk Rate",
+                          "Bwd Avg Bytes/Bulk", "Bwd Avg Packets/Bulk", "Bwd Avg Bulk Rate",
+                          "Subflow Fwd Packets", "Subflow Fwd Bytes", "Subflow Bwd Packets",
+                          "Subflow Bwd Bytes", "Init_Win_bytes_forward", "Init_Win_bytes_backward",
+                          "act_data_pkt_fwd", "min_seg_size_forward", "Active Mean", "Active Std",
+                          "Active Max", "Active Min", "Idle Mean", "Idle Std", "Idle Max", "Idle Min"
+                        ].map((name, i) => (
+                          <tr key={i}>
+                            <td style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: '0.8rem' }}>{i + 1}</td>
+                            <td className="feat-name" style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem' }}>{name}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {activeInfoModal === 'quantum_6' && (
+                <div>
+                  <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem', fontSize: '0.9rem' }}>
+                    These 6 features were selected from the 78 features to represent the network traffic profile in a 6-qubit state space. They are transformed by the quantum scaler before kernel evaluation.
+                  </p>
+                  <table className="history-table" style={{ fontSize: '0.8rem' }}>
+                    <thead>
+                      <tr>
+                        <th>Qubit</th>
+                        <th>Feature Name</th>
+                        <th>Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        { q: 'q[0]', name: 'Init_Win_bytes_forward', desc: 'Number of bytes sent in initial window in forward direction' },
+                        { q: 'q[1]', name: 'Fwd Packet Length Max', desc: 'Maximum length of forward packets' },
+                        { q: 'q[2]', name: 'Bwd Packet Length Max', desc: 'Maximum length of backward packets' },
+                        { q: 'q[3]', name: 'Fwd Packet Length Mean', desc: 'Mean length of forward packets' },
+                        { q: 'q[4]', name: 'Avg Bwd Segment Size', desc: 'Average segment size of backward packets' },
+                        { q: 'q[5]', name: 'Subflow Fwd Bytes', desc: 'Average number of bytes in subflow in forward direction' }
+                      ].map((item, i) => (
+                        <tr key={i}>
+                          <td style={{ fontFamily: 'monospace', color: '#c084fc', fontWeight: 'bold' }}>{item.q}</td>
+                          <td className="feat-name" style={{ fontWeight: '600' }}>{item.name}</td>
+                          <td style={{ color: 'var(--text-secondary)' }}>{item.desc}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {activeInfoModal === 'ensemble_2' && (
+                <div>
+                  <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem', fontSize: '0.9rem' }}>
+                    The system implements a hybrid ensemble decision policy combining a Classical Random Forest and a Quantum SVM.
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                    <div style={{ padding: '0.75rem', background: 'rgba(52, 211, 153, 0.04)', border: '1px solid rgba(52, 211, 153, 0.15)', borderRadius: '8px' }}>
+                      <h4 style={{ color: '#34d399', marginBottom: '0.4rem', fontSize: '0.85rem' }}>1. Classical Engine</h4>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0 }}>
+                        <strong>Model</strong>: Random Forest<br />
+                        <strong>Features</strong>: All 78 CICIDS features<br />
+                        <strong>Strength</strong>: High-throughput filtering of known signatures.
+                      </p>
+                    </div>
+                    <div style={{ padding: '0.75rem', background: 'rgba(167, 139, 250, 0.04)', border: '1px solid rgba(167, 139, 250, 0.15)', borderRadius: '8px' }}>
+                      <h4 style={{ color: '#c084fc', marginBottom: '0.4rem', fontSize: '0.85rem' }}>2. Quantum Engine</h4>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0 }}>
+                        <strong>Model</strong>: QSVM + Fidelity Kernel<br />
+                        <strong>Features</strong>: 6 Selected features<br />
+                        <strong>Strength</strong>: Captures non-linear feature overlaps.
+                      </p>
+                    </div>
+                  </div>
+
+                  <h4 style={{ color: 'var(--text-primary)', marginBottom: '0.4rem', fontSize: '0.85rem' }}>Hybrid Decision Policy Matrix:</h4>
+                  <table className="history-table" style={{ fontSize: '0.8rem' }}>
+                    <thead>
+                      <tr>
+                        <th>RF</th>
+                        <th>QSVM</th>
+                        <th>Combined Verdict</th>
+                        <th>Risk Level</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>🟢 BENIGN</td>
+                        <td>🟢 BENIGN</td>
+                        <td><span className="badge-result-benign">🟢 BENIGN</span></td>
+                        <td><span className="risk-tag risk-tag-low">LOW</span></td>
+                      </tr>
+                      <tr>
+                        <td>🔴 ATTACK</td>
+                        <td>🔴 ATTACK</td>
+                        <td><span className="badge-result-attack">🔴 ATTACK</span></td>
+                        <td><span className="risk-tag risk-tag-high">HIGH</span></td>
+                      </tr>
+                      <tr>
+                        <td>🟢 BENIGN</td>
+                        <td>🔴 ATTACK</td>
+                        <td style={{ color: '#f59e0b', fontWeight: 'bold' }}>⚠️ SUSPICIOUS</td>
+                        <td><span className="risk-tag" style={{ background: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)' }}>MEDIUM</span></td>
+                      </tr>
+                      <tr>
+                        <td>🔴 ATTACK</td>
+                        <td>🟢 BENIGN</td>
+                        <td style={{ color: '#f59e0b', fontWeight: 'bold' }}>⚠️ SUSPICIOUS</td>
+                        <td><span className="risk-tag" style={{ background: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)' }}>MEDIUM</span></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {activeInfoModal === 'ref_100' && (
+                <div>
+                  <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem', fontSize: '0.9rem' }}>
+                    The Quantum SVM evaluates the similarity (fidelity) of incoming live flows against a curated reference set of <strong>100 training states</strong>. 
+                  </p>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
+                    Each reference state acts as a coordinate point in the Hilbert space. The kernel computes:
+                    <code style={{ display: 'block', padding: '0.5rem', background: 'rgba(0,0,0,0.3)', borderRadius: '6px', fontFamily: 'monospace', color: '#c084fc', marginTop: '0.5rem' }}>
+                      K_test[i][j] = |&lt;psi(flow_i) | psi(ref_j)&gt;|^2
+                    </code>
+                  </p>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>
+                    These reference states are preloaded from <code>X6_train_small.npy</code>. We cache their corresponding precomputed statevectors on startup (taking only 0.13 seconds) to enable vectorized prediction times under 120 ms!
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -71,6 +71,7 @@ if SRC_DIR not in sys.path:
 
 from prediction import (
     detect_intrusion,
+    detect_intrusion_batch,
     SELECTED_FEATURES
 )
 
@@ -501,23 +502,71 @@ def capture_live(
 
         proc_start = time.time()
 
-        res = subprocess.run(
+        # Log capture details
+        print(f"\n==================================================", flush=True)
+        print(f"[LIVE CAPTURE] Starting capture request:", flush=True)
+        print(f"  TShark Path        : {tshark_path}", flush=True)
+        print(f"  Selected Interface : {req.interface}", flush=True)
+        print(f"  Requested Duration : {duration} seconds", flush=True)
+        print(f"  PCAP Target Path   : {pcap_path}", flush=True)
+        print(f"  Command Line       : {cmd_str}", flush=True)
+        print(f"==================================================", flush=True)
 
+        # Start connection scanner thread to capture short-lived connections during execution
+        import threading
+        import psutil
+        port_to_process = {}
+        stop_event = threading.Event()
+        
+        def scan_connections():
+            while not stop_event.is_set():
+                try:
+                    for conn in psutil.net_connections(kind='inet'):
+                        if conn.laddr and conn.pid:
+                            try:
+                                port_to_process[conn.laddr.port] = psutil.Process(conn.pid).name()
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+                time.sleep(0.15) # Poll connections every 150ms
+                
+        scan_thread = threading.Thread(target=scan_connections, daemon=True)
+        scan_thread.start()
+
+        t_startup_start = time.time()
+        proc = subprocess.Popen(
             cmd_str,
-
-            capture_output=True,
-
-            text=True,
-
-            timeout=duration + 15,
-
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             shell=True
         )
+        t_startup_end = time.time()
+        startup_time_sec = t_startup_end - t_startup_start
 
-        capture_time = round(
-            time.time() - proc_start,
-            2
-        )
+        t_capture_start = time.time()
+        try:
+            res_stdout, res_stderr = proc.communicate(timeout=duration + 15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            res_stdout, res_stderr = proc.communicate()
+            raise subprocess.TimeoutExpired(cmd_str, duration + 15, output=res_stdout, stderr=res_stderr)
+        finally:
+            # Stop connections scanner thread
+            stop_event.set()
+            scan_thread.join(timeout=1.0)
+            
+        t_capture_end = time.time()
+        capture_time_sec = t_capture_end - t_capture_start
+        capture_time = round(startup_time_sec + capture_time_sec, 2)
+
+        print(f"[LIVE CAPTURE] TShark process finished in {capture_time} seconds.", flush=True)
+        if proc.returncode != 0:
+            print(f"[LIVE CAPTURE] TShark non-zero exit code: {proc.returncode}", flush=True)
+            print(f"[LIVE CAPTURE] TShark stderr output:\n{res_stderr.decode('utf-8', errors='ignore') if res_stderr else ''}", flush=True)
+
+        # Safety sleep margin to ensure OS flushes file completely
+        time.sleep(0.2)
 
         # ----------------------------------------------------
         # Verify PCAP
@@ -526,20 +575,30 @@ def capture_live(
         if not os.path.exists(
             pcap_path
         ):
-
+            print(f"[LIVE CAPTURE] PCAP file not found: {pcap_path}", flush=True)
             raise RuntimeError(
                 "TShark did not create a PCAP file."
             )
 
+        pcap_size = os.path.getsize(pcap_path)
+        print(f"[LIVE CAPTURE] PCAP file size: {pcap_size} bytes.", flush=True)
+
         # ----------------------------------------------------
         # Extract flows
         # ----------------------------------------------------
-
-        extracted_flows = (
-            extract_flows_from_pcap(
-                pcap_path
-            )
+        extract_start = time.time()
+        extracted_flows, ext_timings = extract_flows_from_pcap(
+            pcap_path,
+            return_timings=True
         )
+        extract_time = round(time.time() - extract_start, 2)
+        
+        # Calculate packet count
+        pkt_count = sum(flow["flow_meta"]["packets_count"] for flow in extracted_flows) if extracted_flows else 0
+        print(f"[LIVE CAPTURE] Flow extraction complete:", flush=True)
+        print(f"  Packets Extracted  : {pkt_count}", flush=True)
+        print(f"  Flows Extracted    : {len(extracted_flows)}", flush=True)
+        print(f"  Extraction Time    : {extract_time} seconds", flush=True)
 
         # ----------------------------------------------------
         # Cleanup
@@ -554,111 +613,84 @@ def capture_live(
                 os.remove(
                     pcap_path
                 )
+                print(f"[LIVE CAPTURE] PCAP file deleted successfully.", flush=True)
 
-            except Exception:
-
-                pass
+            except Exception as cleanup_err:
+                print(f"[LIVE CAPTURE] Cleanup warning: {cleanup_err}", flush=True)
 
         # ----------------------------------------------------
         # Process flows
         # ----------------------------------------------------
 
+        def guess_process_by_port(port):
+            standard_ports = {
+                53: "system-resolver (DNS)",
+                5353: "mdns.exe (mDNS)",
+                1900: "ssdp.exe (SSDP/UPnP)",
+                123: "w32time.exe (NTP)",
+                137: "netbios.exe (NetBIOS)",
+                138: "netbios.exe (NetBIOS)",
+                139: "netbios.exe (NetBIOS)",
+                445: "smb.exe (SMB)",
+                5355: "llmnr.exe (LLMNR)"
+            }
+            return standard_ports.get(port, "Unknown Process")
+
+        feats_list = [item["features"] for item in extracted_flows]
+        batch_results, rf_time_sec, quantum_time_sec, decision_time_sec = detect_intrusion_batch(feats_list)
+
         processed_flows = []
-
-        for item in extracted_flows:
-
-            meta = item[
-                "flow_meta"
-            ]
-
-            feats = item[
-                "features"
-            ]
-
-            # ------------------------------------------------
-            # Hybrid ML
-            # ------------------------------------------------
-
-            ml_res = detect_intrusion(
-                feats
-            )
-
-            # ------------------------------------------------
-            # Quantum features
-            # ------------------------------------------------
+        for i, item in enumerate(extracted_flows):
+            meta = item["flow_meta"]
+            feats = item["features"]
+            ml_res = batch_results[i]
 
             q_features_extracted = {
-
-                k:
-                    feats.get(
-                        k,
-                        0.0
-                    )
-
+                k: feats.get(k, 0.0)
                 for k in SELECTED_FEATURES
             }
 
-            # ------------------------------------------------
-            # Flow result
-            # ------------------------------------------------
+            # Map ports to process name (first checking for kernel protocols or port 0, then standard lookup, then guessing)
+            proc_name = "Unknown Process"
+            s_port = meta.get("src_port")
+            d_port = meta.get("dst_port")
+            proto = meta.get("protocol")
+            
+            if proto not in ("TCP", "UDP") or s_port == 0 or d_port == 0:
+                proc_name = "Windows Kernel (System)"
+            elif s_port in port_to_process:
+                proc_name = port_to_process[s_port]
+            elif d_port in port_to_process:
+                proc_name = port_to_process[d_port]
+            else:
+                # Try guessing standard protocols
+                proc_name = guess_process_by_port(s_port)
+                if proc_name == "Unknown Process":
+                    proc_name = guess_process_by_port(d_port)
 
             processed_flows.append({
-
-                "flow_id":
-                    f"FLOW-{len(processed_flows)+1:03d}",
-
-                "src_ip":
-                    meta["src_ip"],
-
-                "src_port":
-                    meta["src_port"],
-
-                "dst_ip":
-                    meta["dst_ip"],
-
-                "dst_port":
-                    meta["dst_port"],
-
-                "protocol":
-                    meta["protocol"],
-
-                "packets_count":
-                    meta["packets_count"],
-
-                "duration_ms":
-                    meta["duration_ms"],
-
-                "classical_prediction":
-                    ml_res[
-                        "classical_prediction"
-                    ],
-
-                "quantum_prediction":
-                    ml_res[
-                        "quantum_prediction"
-                    ],
-
-                "final_prediction":
-                    ml_res[
-                        "final_prediction"
-                    ],
-
-                "risk_level":
-                    ml_res[
-                        "risk_level"
-                    ],
-
-                "quantum_features":
-                    q_features_extracted,
-
-                "all_features":
-                    feats
+                "flow_id": f"FLOW-{i+1:03d}",
+                "src_ip": meta["src_ip"],
+                "src_port": meta["src_port"],
+                "dst_ip": meta["dst_ip"],
+                "dst_port": meta["dst_port"],
+                "protocol": meta["protocol"],
+                "packets_count": meta["packets_count"],
+                "duration_ms": meta["duration_ms"],
+                "process_name": proc_name,
+                "classical_prediction": ml_res["classical_prediction"],
+                "quantum_prediction": ml_res["quantum_prediction"],
+                "final_prediction": ml_res["final_prediction"],
+                "risk_level": ml_res["risk_level"],
+                "quantum_features": q_features_extracted,
+                "all_features": feats
             })
 
         # ----------------------------------------------------
         # Overall result
         # ----------------------------------------------------
 
+        t_api_start = time.time()
         (
             attack_count,
             suspicious_count,
@@ -673,7 +705,7 @@ def capture_live(
         # Response
         # ----------------------------------------------------
 
-        return {
+        response_dict = {
 
             "success":
                 True,
@@ -702,12 +734,50 @@ def capture_live(
             "overall_prediction":
                 overall_prediction,
 
+            "final_prediction":
+                overall_prediction,
+
             "overall_risk_level":
+                overall_risk,
+
+            "risk_level":
                 overall_risk,
 
             "flows":
                 processed_flows
         }
+
+        api_time_sec = time.time() - t_api_start
+        total_pipeline_time = time.time() - proc_start
+
+        print(f"\n==================================================", flush=True)
+        print(f"[TIMING REPORT] UC029 Capture Pipeline Performance:", flush=True)
+        print(f"  1. TShark Startup       : {startup_time_sec * 1000:.2f} ms", flush=True)
+        print(f"  2. TShark Capture       : {capture_time_sec * 1000:.2f} ms", flush=True)
+        print(f"  3. PCAP Reading         : {ext_timings['pcap_reading_sec'] * 1000:.2f} ms", flush=True)
+        print(f"  4. Flow Construction    : {ext_timings['flow_construction_sec'] * 1000:.2f} ms", flush=True)
+        print(f"  5. Feature Extraction   : {ext_timings['feature_extraction_sec'] * 1000:.2f} ms", flush=True)
+        print(f"  6. Random Forest Pred   : {rf_time_sec * 1000:.2f} ms", flush=True)
+        print(f"  7. Quantum SVM Pred     : {quantum_time_sec * 1000:.2f} ms", flush=True)
+        print(f"  8. Hybrid Decision      : {decision_time_sec * 1000:.2f} ms", flush=True)
+        print(f"  9. API Response Gen     : {api_time_sec * 1000:.2f} ms", flush=True)
+        print(f"  Total Pipeline Time     : {total_pipeline_time * 1000:.2f} ms", flush=True)
+        print(f"==================================================\n", flush=True)
+
+        response_dict["timings"] = {
+            "tshark_startup_ms": round(startup_time_sec * 1000, 2),
+            "tshark_capture_ms": round(capture_time_sec * 1000, 2),
+            "pcap_reading_ms": round(ext_timings["pcap_reading_sec"] * 1000, 2),
+            "flow_construction_ms": round(ext_timings["flow_construction_sec"] * 1000, 2),
+            "feature_extraction_ms": round(ext_timings["feature_extraction_sec"] * 1000, 2),
+            "random_forest_pred_ms": round(rf_time_sec * 1000, 2),
+            "quantum_svm_pred_ms": round(quantum_time_sec * 1000, 2),
+            "hybrid_decision_ms": round(decision_time_sec * 1000, 2),
+            "api_response_gen_ms": round(api_time_sec * 1000, 2),
+            "total_pipeline_ms": round(total_pipeline_time * 1000, 2)
+        }
+
+        return response_dict
 
     except subprocess.TimeoutExpired:
 
@@ -864,107 +934,57 @@ async def predict_file(
                     contents
                 )
 
+            proc_start = time.time()
             try:
-
-                extracted_flows = (
-                    extract_flows_from_pcap(
-                        pcap_path
-                    )
+                extract_start = time.time()
+                extracted_flows, ext_timings = extract_flows_from_pcap(
+                    pcap_path,
+                    return_timings=True
                 )
-
+                extract_time = round(time.time() - extract_start, 2)
             finally:
-
                 if os.path.exists(
                     pcap_path
                 ):
-
                     try:
-
                         os.remove(
                             pcap_path
                         )
-
                     except Exception:
-
                         pass
 
+            feats_list = [item["features"] for item in extracted_flows]
+            batch_results, rf_time_sec, quantum_time_sec, decision_time_sec = detect_intrusion_batch(feats_list)
+
             processed_flows = []
-
-            for item in extracted_flows:
-
-                meta = item[
-                    "flow_meta"
-                ]
-
-                feats = item[
-                    "features"
-                ]
-
-                ml_res = detect_intrusion(
-                    feats
-                )
+            for i, item in enumerate(extracted_flows):
+                meta = item["flow_meta"]
+                feats = item["features"]
+                ml_res = batch_results[i]
 
                 q_features_extracted = {
-
-                    k:
-                        feats.get(
-                            k,
-                            0.0
-                        )
-
+                    k: feats.get(k, 0.0)
                     for k in SELECTED_FEATURES
                 }
 
                 processed_flows.append({
-
-                    "flow_id":
-                        f"FLOW-{len(processed_flows)+1:03d}",
-
-                    "src_ip":
-                        meta["src_ip"],
-
-                    "src_port":
-                        meta["src_port"],
-
-                    "dst_ip":
-                        meta["dst_ip"],
-
-                    "dst_port":
-                        meta["dst_port"],
-
-                    "protocol":
-                        meta["protocol"],
-
-                    "packets_count":
-                        meta["packets_count"],
-
-                    "duration_ms":
-                        meta["duration_ms"],
-
-                    "classical_prediction":
-                        ml_res[
-                            "classical_prediction"
-                        ],
-
-                    "quantum_prediction":
-                        ml_res[
-                            "quantum_prediction"
-                        ],
-
-                    "final_prediction":
-                        ml_res[
-                            "final_prediction"
-                        ],
-
-                    "risk_level":
-                        ml_res[
-                            "risk_level"
-                        ],
-
-                    "quantum_features":
-                        q_features_extracted
+                    "flow_id": f"FLOW-{i+1:03d}",
+                    "src_ip": meta["src_ip"],
+                    "src_port": meta["src_port"],
+                    "dst_ip": meta["dst_ip"],
+                    "dst_port": meta["dst_port"],
+                    "protocol": meta["protocol"],
+                    "packets_count": meta["packets_count"],
+                    "duration_ms": meta["duration_ms"],
+                    "classical_prediction": ml_res["classical_prediction"],
+                    "quantum_prediction": ml_res["quantum_prediction"],
+                    "final_prediction": ml_res["final_prediction"],
+                    "risk_level": ml_res["risk_level"],
+                    "quantum_features": q_features_extracted,
+                    "all_features": feats
                 })
 
+            t_api_start = time.time()
             (
                 attack_count,
                 suspicious_count,
@@ -975,38 +995,60 @@ async def predict_file(
                 processed_flows
             )
 
-            return {
-
+            response_dict = {
                 "success":
                     True,
-
                 "filename":
                     file.filename,
-
                 "file_type":
                     "PCAP Network Capture",
-
                 "total_flows_analyzed":
                     len(processed_flows),
-
                 "attack_flows_detected":
                     attack_count,
-
                 "suspicious_flows_detected":
                     suspicious_count,
-
                 "benign_flows_detected":
                     benign_count,
-
                 "overall_prediction":
                     overall_prediction,
-
+                "final_prediction":
+                    overall_prediction,
+                "overall_risk_level":
+                    overall_risk,
                 "risk_level":
                     overall_risk,
-
                 "flows":
                     processed_flows
             }
+
+            api_time_sec = time.time() - t_api_start
+            total_pipeline_time = time.time() - proc_start
+
+            print(f"\n==================================================", flush=True)
+            print(f"[TIMING REPORT] PCAP File Upload Performance:", flush=True)
+            print(f"  1. PCAP Reading         : {ext_timings['pcap_reading_sec'] * 1000:.2f} ms", flush=True)
+            print(f"  2. Flow Construction    : {ext_timings['flow_construction_sec'] * 1000:.2f} ms", flush=True)
+            print(f"  3. Feature Extraction   : {ext_timings['feature_extraction_sec'] * 1000:.2f} ms", flush=True)
+            print(f"  4. Random Forest Pred   : {rf_time_sec * 1000:.2f} ms", flush=True)
+            print(f"  5. Quantum SVM Pred     : {quantum_time_sec * 1000:.2f} ms", flush=True)
+            print(f"  6. Hybrid Decision      : {decision_time_sec * 1000:.2f} ms", flush=True)
+            print(f"  7. API Response Gen     : {api_time_sec * 1000:.2f} ms", flush=True)
+            print(f"  Total Pipeline Time     : {total_pipeline_time * 1000:.2f} ms", flush=True)
+            print(f"==================================================\n", flush=True)
+
+            response_dict["timings"] = {
+                "pcap_reading_ms": round(ext_timings["pcap_reading_sec"] * 1000, 2),
+                "flow_construction_ms": round(ext_timings["flow_construction_sec"] * 1000, 2),
+                "feature_extraction_ms": round(ext_timings["feature_extraction_sec"] * 1000, 2),
+                "random_forest_pred_ms": round(rf_time_sec * 1000, 2),
+                "quantum_svm_pred_ms": round(quantum_time_sec * 1000, 2),
+                "hybrid_decision_ms": round(decision_time_sec * 1000, 2),
+                "api_response_gen_ms": round(api_time_sec * 1000, 2),
+                "total_pipeline_ms": round(total_pipeline_time * 1000, 2)
+            }
+
+            return response_dict
 
         # ====================================================
         # JSON

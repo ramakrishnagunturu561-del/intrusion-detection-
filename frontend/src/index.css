@@ -144,6 +144,14 @@ body {
   align-items: center;
   gap: 1.25rem;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+.stat-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: 0 8px 30px rgba(59, 130, 246, 0.15);
 }
 
 .stat-icon {
@@ -565,7 +573,7 @@ body {
 }
 
 .history-table th {
-  padding: 0.75rem 1rem;
+  padding: 0.75rem 0.6rem;
   background: rgba(9, 13, 22, 0.8);
   color: var(--text-secondary);
   font-weight: 600;
@@ -576,7 +584,7 @@ body {
 }
 
 .history-table td {
-  padding: 0.85rem 1rem;
+  padding: 0.8rem 0.6rem;
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -1031,5 +1039,59 @@ body {
 
 .feat-name { color: #cbd5e1; font-weight: 500; }
 .feat-val { color: #38bdf8; font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+
+/* Timing Performance Timeline Styling */
+.timing-timeline-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--accent-color);
+  margin-bottom: 1rem;
+}
+
+.timing-timeline-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.timing-card {
+  background: rgba(30, 41, 59, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  text-align: center;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.timing-card:hover {
+  transform: translateY(-3px);
+  background: rgba(30, 41, 59, 0.55);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.timing-card-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.timing-card-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
 
 

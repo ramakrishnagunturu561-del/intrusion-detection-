@@ -1,7 +1,9 @@
 from src.flow_extractor import extract_flows_from_pcap
 from src.prediction import detect_intrusion
 
-PCAP = r"C:\Users\bapi0\Downloads\intrusion-detection-\test_live.pcapng"
+import os
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+PCAP = os.path.join(PROJECT_ROOT, "live_test.pcapng")
 
 FEATURES = [
     "Init_Win_bytes_forward",

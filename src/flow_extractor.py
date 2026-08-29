@@ -94,23 +94,36 @@ def _calc_stats(arr):
     return float(np.max(arr)), float(np.min(arr)), float(np.mean(arr)), float(np.std(arr))
 
 
-def extract_flows_from_pcap(pcap_path: str):
+def extract_flows_from_pcap(pcap_path: str, return_timings: bool = False):
     """
     Parses a .pcap / .pcapng file and extracts 78 CICIDS2017 features per 5-tuple flow.
     """
+    import time
     if not os.path.exists(pcap_path):
         raise FileNotFoundError(f"PCAP file not found: {pcap_path}")
 
+    t_start_pcap = time.time()
     packets = []
     try:
-        from scapy.all import rdpcap, IP, IPv6, TCP, UDP
+        from scapy.all import rdpcap
         packets = rdpcap(pcap_path)
+        print(f"[FlowExtractor] Read {len(packets)} packets from PCAP file: {pcap_path}", flush=True)
     except Exception as e:
-        print(f"Scapy rdpcap warning: {e}")
+        print(f"[FlowExtractor] Scapy rdpcap warning: {e}", flush=True)
+    t_end_pcap = time.time()
+    pcap_read_time = t_end_pcap - t_start_pcap
 
     if not packets:
-        return [_create_default_flow(dst_port=80)]
+        print(f"[FlowExtractor] PCAP file contains 0 packets. Returning empty flow list.", flush=True)
+        if return_timings:
+            return [], {
+                "pcap_reading_sec": pcap_read_time,
+                "flow_construction_sec": 0.0,
+                "feature_extraction_sec": 0.0
+            }
+        return []
 
+    t_start_flow = time.time()
     from scapy.all import IP, IPv6, TCP, UDP
 
     flows = {}
@@ -129,10 +142,24 @@ def extract_flows_from_pcap(pcap_path: str):
             src_ip = pkt[IP].src
             dst_ip = pkt[IP].dst
             proto = str(pkt[IP].proto)
+            # Map standard protocols
+            if pkt[IP].proto == 1:
+                proto = "ICMP"
+            elif pkt[IP].proto == 6:
+                proto = "TCP"
+            elif pkt[IP].proto == 17:
+                proto = "UDP"
         elif pkt.haslayer(IPv6):
             src_ip = pkt[IPv6].src
             dst_ip = pkt[IPv6].dst
             proto = str(pkt[IPv6].nh)
+            # Map standard protocols
+            if pkt[IPv6].nh == 58:
+                proto = "ICMPv6"
+            elif pkt[IPv6].nh == 6:
+                proto = "TCP"
+            elif pkt[IPv6].nh == 17:
+                proto = "UDP"
         else:
             continue
 
@@ -156,6 +183,12 @@ def extract_flows_from_pcap(pcap_path: str):
             proto = "UDP"
             src_port = pkt[UDP].sport
             dst_port = pkt[UDP].dport
+            hdr_len = 8
+        elif pkt.haslayer("ICMP"):
+            proto = "ICMP"
+            hdr_len = 8
+        elif pkt.haslayer("ICMPv6") or proto == "ICMPv6":
+            proto = "ICMPv6"
             hdr_len = 8
 
         flow_key = (src_ip, src_port, dst_ip, dst_port, proto)
@@ -189,9 +222,20 @@ def extract_flows_from_pcap(pcap_path: str):
                 "hdr_len": hdr_len
             }]
 
-    if not flows:
-        return [_create_default_flow(dst_port=80)]
+    t_end_flow = time.time()
+    flow_const_time = t_end_flow - t_start_flow
 
+    if not flows:
+        print(f"[FlowExtractor] Grouped 0 flows from packets. Returning empty flow list.", flush=True)
+        if return_timings:
+            return [], {
+                "pcap_reading_sec": pcap_read_time,
+                "flow_construction_sec": flow_const_time,
+                "feature_extraction_sec": 0.0
+            }
+        return []
+
+    t_start_feat = time.time()
     result_flows = []
 
     for (src_ip, src_port, dst_ip, dst_port, proto), pkt_list in flows.items():
@@ -376,6 +420,16 @@ def extract_flows_from_pcap(pcap_path: str):
             "features": feat_dict
         })
 
+    t_end_feat = time.time()
+    feat_ext_time = t_end_feat - t_start_feat
+
+    if return_timings:
+        timings = {
+            "pcap_reading_sec": pcap_read_time,
+            "flow_construction_sec": flow_const_time,
+            "feature_extraction_sec": feat_ext_time
+        }
+        return result_flows, timings
     return result_flows
 
 
