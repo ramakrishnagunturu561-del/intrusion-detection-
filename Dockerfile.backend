@@ -33,5 +33,5 @@ ENV PYTHONUNBUFFERED=1
 RUN useradd -m appuser && chown -R appuser:appuser /app
 USER appuser
 
-# Run the app using gunicorn
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "backend.main:app", "-b", "0.0.0.0:8000"]
+# Run the app using gunicorn with 1 worker to save memory
+CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "backend.main:app", "-b", "0.0.0.0:8000"]
