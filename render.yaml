@@ -3,6 +3,7 @@ services:
   - type: web
     name: intrusion-detection-api
     env: docker
+    plan: free
     dockerfilePath: ./Dockerfile.backend
     envVars:
       - key: ALLOWED_ORIGINS
