@@ -1,0 +1,9 @@
+services:
+  # The FastAPI Backend
+  - type: web
+    name: intrusion-detection-api
+    env: docker
+    dockerfilePath: ./Dockerfile.backend
+    envVars:
+      - key: ALLOWED_ORIGINS
+        value: "*" # Set this to your Vercel URL later for security

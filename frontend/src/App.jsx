@@ -3,7 +3,7 @@ import axios from 'axios';
 import './index.css';
 
 // Default API base URL configuration (prioritizing 8080, fallback 8000)
-const PRIMARY_API_URL = 'http://127.0.0.1:8000';
+const PRIMARY_API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 const FALLBACK_API_URL = 'http://127.0.0.1:8080';
 
 const QUANTUM_FEATURES = [
