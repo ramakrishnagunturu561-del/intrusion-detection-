@@ -16,6 +16,9 @@ COPY frontend/ ./
 ARG VITE_API_URL
 ENV VITE_API_URL=${VITE_API_URL}
 
+# Set max memory for Node to prevent Out of Memory errors during build
+ENV NODE_OPTIONS="--max_old_space_size=512"
+
 # Build the app for production
 RUN npm run build
 
