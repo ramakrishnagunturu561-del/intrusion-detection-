@@ -9,12 +9,12 @@ services:
       - key: ALLOWED_ORIGINS
         value: "*" # Set this to your Vercel URL later for security
 
-  # The Frontend
+  # The Frontend (Static Site - Faster, no Docker build issues)
   - type: web
     name: intrusion-detection-frontend
-    env: docker
-    plan: free
-    dockerfilePath: ./Dockerfile.frontend
+    env: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/dist
     envVars:
       - key: VITE_API_URL
         fromService:
