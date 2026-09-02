@@ -8,3 +8,16 @@ services:
     envVars:
       - key: ALLOWED_ORIGINS
         value: "*" # Set this to your Vercel URL later for security
+
+  # The Frontend
+  - type: web
+    name: intrusion-detection-frontend
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile.frontend
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: intrusion-detection-api
+          envVarKey: RENDER_EXTERNAL_URL
