@@ -15,7 +15,7 @@ COPY requirements.txt /app/
 
 # Upgrade pip and install any needed packages specified in requirements.txt
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --root-user-action=ignore --no-cache-dir -r requirements.txt
 
 # Copy the rest of the backend and src directories
 COPY backend/ /app/backend/
