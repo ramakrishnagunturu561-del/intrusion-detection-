@@ -1,0 +1,33 @@
+# docker-compose.dev.yml – use for local development or on a VM where live capture is needed
+# This file adds the required Linux capabilities so that TShark can open network interfaces.
+# It builds the same images as docker-compose.yml but runs the backend container with
+# NET_RAW and NET_ADMIN capabilities (or full privileged mode) to allow live sniffing.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ALLOWED_ORIGINS=http://localhost,http://127.0.0.1
+    restart: unless-stopped
+    # Grant raw‑socket access to TShark
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    # Alternatively you can run in full privileged mode (uncomment the line below)
+    # privileged: true
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        - VITE_API_URL=http://localhost:8000
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    depends_on:
+      - backend

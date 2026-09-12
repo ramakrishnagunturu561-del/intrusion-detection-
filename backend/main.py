@@ -350,7 +350,7 @@ def list_interfaces():
 
 class LiveCaptureRequest(BaseModel):
 
-    interface: str = "4"
+    interface: str = "1"
 
     duration: int = 5
 

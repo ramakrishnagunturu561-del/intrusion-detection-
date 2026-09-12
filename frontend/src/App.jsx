@@ -91,12 +91,13 @@ function App() {
       .then(res => {
         if (res.data.success && res.data.interfaces.length > 0) {
           setInterfaces(res.data.interfaces);
-          const wifi = res.data.interfaces.find(i => i.name.toLowerCase().includes('wi-fi') || i.id === '4');
-          if (wifi) {
-            setSelectedInterface(wifi.id);
-          } else {
-            setSelectedInterface(res.data.interfaces[0].id);
-          }
+          const defaultInterface = res.data.interfaces.find(i => 
+            i.name.toLowerCase().includes('wi-fi') || 
+            i.device === 'eth0' ||
+            i.device === 'any' ||
+            i.name.toLowerCase().includes('eth')
+          ) || res.data.interfaces[0];
+          setSelectedInterface(defaultInterface.id);
         }
       })
       .catch(err => console.log('Unable to fetch interfaces:', err));
