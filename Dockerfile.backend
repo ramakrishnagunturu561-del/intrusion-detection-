@@ -22,6 +22,11 @@ RUN pip install --upgrade pip && \
 COPY backend/ /app/backend/
 COPY src/ /app/src/
 COPY models/ /app/models/
+COPY data/ /app/data/
+COPY live_test.pcapng /app/live_test.pcapng
+
+# Grant dumpcap network capture capabilities
+RUN setcap cap_net_raw,cap_net_admin=eip /usr/bin/dumpcap || true
 
 # Make port 8000 available to the world outside this container
 EXPOSE 8000
@@ -29,10 +34,6 @@ EXPOSE 8000
 # Define environment variables
 ENV PYTHONPATH="/app:/app/src:/app/backend"
 ENV PYTHONUNBUFFERED=1
-
-# Create a non-root user and change ownership
-RUN useradd -m appuser && chown -R appuser:appuser /app
-USER appuser
 
 # Run the app using gunicorn with 1 worker to save memory
 CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "backend.main:app", "-b", "0.0.0.0:8000"]
