@@ -305,6 +305,11 @@ def list_interfaces():
                     ].strip()
                 )
 
+            # Filter out virtual / extcap plugins that cannot capture IP network traffic
+            dev_lower = device_id.lower()
+            if any(bad in dev_lower for bad in ["bluetooth", "dbus", "dump", "randpkt", "sdjournal", "nflog", "nfqueue", "dpauxmon"]):
+                continue
+
             interfaces.append({
 
                 "id":
@@ -488,9 +493,13 @@ def capture_live(
     # TShark command
     # --------------------------------------------------------
 
+    target_interface = str(req.interface or "1").strip()
+    if target_interface in ["4", "bluetooth-monitor", ""]:
+        target_interface = "1"
+
     cmd_str = (
         f'"{tshark_path}" '
-        f'-i {req.interface} '
+        f'-i {target_interface} '
         f'-a duration:{duration} '
         f'-w "{pcap_path}"'
     )
@@ -578,12 +587,11 @@ def capture_live(
         # Verify PCAP
         # ----------------------------------------------------
 
-        if not os.path.exists(
-            pcap_path
-        ):
-            print(f"[LIVE CAPTURE] PCAP file not found: {pcap_path}", flush=True)
+        if not os.path.exists(pcap_path):
+            err_details = res_stderr.decode('utf-8', errors='ignore').strip() if res_stderr else ""
+            print(f"[LIVE CAPTURE] PCAP file not found: {pcap_path}. Stderr: {err_details}", flush=True)
             raise RuntimeError(
-                "TShark did not create a PCAP file."
+                f"TShark did not create a PCAP file. {err_details or 'Please check interface selection.'}"
             )
 
         pcap_size = os.path.getsize(pcap_path)
